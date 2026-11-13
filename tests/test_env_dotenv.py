@@ -212,6 +212,11 @@ def _load_check_db():
 
 def test_check_db_reports_missing_variables_without_touching_the_network(monkeypatch):
     module = _load_check_db()
+    # This test is about variable-completeness reporting, not about what happens
+    # to be installed on the machine running it. On a host without `pymysql`
+    # (CI installs only `.[mcp,dev]`) `probe` stops at "driver not installed"
+    # and never reaches the missing-variable branch, so stub the driver lookup.
+    monkeypatch.setattr(module, "_driver_available", lambda backend: (True, ""))
     for name in ("CREDIT_AGENT_MYSQL_HOST", "CREDIT_AGENT_MYSQL_DATABASE",
                  "CREDIT_AGENT_MYSQL_USER", "CREDIT_AGENT_MYSQL_PASSWORD"):
         monkeypatch.delenv(name, raising=False)
@@ -227,6 +232,7 @@ def test_check_db_reports_missing_variables_without_touching_the_network(monkeyp
 
 def test_check_db_never_echoes_a_password(monkeypatch):
     module = _load_check_db()
+    monkeypatch.setattr(module, "_driver_available", lambda backend: (True, ""))
     monkeypatch.setenv("CREDIT_AGENT_DATA_BACKEND", "postgres")
     monkeypatch.setenv("CREDIT_AGENT_PG_HOST", "db.internal")
     monkeypatch.setenv("CREDIT_AGENT_PG_DATABASE", "credit")
