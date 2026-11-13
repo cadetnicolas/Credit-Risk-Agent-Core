@@ -1,0 +1,40 @@
+name: tests
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+
+jobs:
+  pytest:
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        python-version: ["3.11", "3.13"]
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Python ${{ matrix.python-version }}
+        uses: actions/setup-python@v5
+        with:
+          python-version: ${{ matrix.python-version }}
+          cache: pip
+
+      - name: Install
+        run: |
+          python -m pip install --upgrade pip
+          python -m pip install -e '.[mcp,dev]'
+
+      - name: Run tests
+        run: python -m pytest -q
+
+      - name: Smoke test the demo chain
+        # The release-contract tests pin the tool names, but only an actual
+        # stdio handshake proves the server boots with real roots on a clean
+        # machine. This is the same command users are told to run.
+        run: |
+          python scripts/make_demo_workspace.py --workspace "$RUNNER_TEMP/ws"
+          python scripts/demo_end_to_end.py --direct --workspace "$RUNNER_TEMP/ws"

@@ -1,0 +1,564 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>信贷分析工具 · 数据库配置</title>
+<style>
+  :root {
+    --bg: #f6f7f9;
+    --surface: #ffffff;
+    --surface-2: #fafbfc;
+    --border: #e3e7ee;
+    --border-strong: #cfd6e2;
+    --text: #171a1f;
+    --muted: #667085;
+    --faint: #98a2b3;
+    --accent: #3b5bdb;
+    --accent-hover: #324fc4;
+    --accent-soft: #eef1fd;
+    --ok: #0f7b52;
+    --ok-soft: #e7f6ef;
+    --warn: #a85a00;
+    --warn-soft: #fff5e6;
+    --danger: #b42318;
+    --danger-soft: #fdeceb;
+    --shadow: 0 1px 2px rgba(16, 24, 40, .04), 0 8px 24px -12px rgba(16, 24, 40, .18);
+    --radius: 14px;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root {
+      --bg: #0e1014;
+      --surface: #16191f;
+      --surface-2: #1b1f27;
+      --border: #262c37;
+      --border-strong: #333b49;
+      --text: #e7eaf0;
+      --muted: #98a2b3;
+      --faint: #6b7484;
+      --accent: #7c8cf8;
+      --accent-hover: #93a0fa;
+      --accent-soft: #1e2436;
+      --ok: #4ade9b;
+      --ok-soft: #12291f;
+      --warn: #f5b350;
+      --warn-soft: #2a2013;
+      --danger: #f8837a;
+      --danger-soft: #2c1717;
+      --shadow: 0 1px 2px rgba(0, 0, 0, .3), 0 8px 24px -12px rgba(0, 0, 0, .6);
+    }
+    /* The dark accent is a light indigo, so white-on-accent would be the one
+       spot in the page below 4.5:1. Dark text on it reads cleanly instead. */
+    .btn.primary { color: #0e1014; font-weight: 620; }
+  }
+  * { box-sizing: border-box; }
+  html, body { margin: 0; padding: 0; }
+  body {
+    background: var(--bg);
+    color: var(--text);
+    font: 14px/1.55 -apple-system, BlinkMacSystemFont, "Segoe UI", "PingFang SC",
+          "Hiragino Sans GB", "Microsoft YaHei", sans-serif;
+    -webkit-font-smoothing: antialiased;
+    padding-bottom: 112px;
+  }
+  .page { max-width: 940px; margin: 0 auto; padding: 36px 24px 96px; }
+
+  header.top { display: flex; align-items: flex-start; gap: 14px; margin-bottom: 26px; }
+  .mark {
+    width: 38px; height: 38px; flex: 0 0 38px; border-radius: 11px;
+    background: var(--accent); display: grid; place-items: center;
+    box-shadow: var(--shadow);
+  }
+  .mark svg { display: block; }
+  h1 { font-size: 19px; font-weight: 620; margin: 1px 0 3px; letter-spacing: -.01em; }
+  .sub { color: var(--muted); font-size: 13px; }
+  .sub code { background: var(--surface-2); border: 1px solid var(--border);
+              padding: 1px 5px; border-radius: 5px; font-size: 12px; }
+
+  .notice {
+    display: flex; gap: 10px; align-items: flex-start;
+    border: 1px solid var(--border); background: var(--surface);
+    border-radius: 11px; padding: 12px 14px; margin-bottom: 12px;
+    font-size: 13px; color: var(--muted);
+  }
+  .notice .ico { flex: 0 0 16px; margin-top: 1px; }
+  .notice strong { color: var(--text); font-weight: 580; }
+  .notice.warn { border-color: color-mix(in srgb, var(--warn) 32%, var(--border));
+                 background: var(--warn-soft); color: var(--warn); }
+  .notice.warn strong { color: var(--warn); }
+  .notice.err { border-color: color-mix(in srgb, var(--danger) 32%, var(--border));
+                background: var(--danger-soft); color: var(--danger); }
+  .notice.ok { border-color: color-mix(in srgb, var(--ok) 28%, var(--border));
+               background: var(--ok-soft); color: var(--ok); }
+  .notice.ok strong { color: var(--ok); }
+
+  .tabs { display: flex; flex-wrap: wrap; gap: 8px; margin: 22px 0 16px; }
+  /* The radio holds the state, the label is the button. Doing this in CSS rather
+     than JS means the tabs still switch in a viewer that blocks scripts. */
+  .tab-radio { position: absolute; opacity: 0; width: 0; height: 0; pointer-events: none; }
+  .tab {
+    cursor: pointer; user-select: none; font-size: 13px; font-weight: 520;
+    display: inline-flex; align-items: center; gap: 7px;
+    padding: 8px 14px; border-radius: 999px;
+    border: 1px solid var(--border); background: var(--surface); color: var(--muted);
+    transition: background .14s, border-color .14s, color .14s;
+  }
+  .tab:hover { border-color: var(--border-strong); color: var(--text); }
+  .tab-radio:checked + .tab {
+    background: var(--accent-soft); border-color: color-mix(in srgb, var(--accent) 40%, transparent);
+    color: var(--accent); font-weight: 600;
+  }
+  .tab-radio:focus-visible + .tab { outline: 2px solid var(--accent); outline-offset: 2px; }
+  .dot { width: 6px; height: 6px; border-radius: 50%; background: var(--border-strong); }
+  .dot.on { background: var(--ok); }
+  .dot.off { background: var(--border-strong); }
+
+  .panel { margin-bottom: 16px; }
+  .panel:last-child { margin-bottom: 0; }
+  /* Where :has() is available the tabs actually switch panels. Where it is not,
+     every panel stays visible — showing one form too many beats showing none. */
+  @supports selector(:has(*)) {
+    .panel { display: none; }
+    .page:has(#tab-holo:checked) #panel-holo,
+    .page:has(#tab-postgres:checked) #panel-postgres,
+    .page:has(#tab-mysql:checked) #panel-mysql,
+    .page:has(#tab-odps:checked) #panel-odps,
+    .page:has(#tab-duckdb:checked) #panel-duckdb { display: block; }
+  }
+
+  /* Shown until the page's script proves it runs. A page that cannot save
+     should say so instead of letting people fill in a form twice. */
+  .banner {
+    display: flex; gap: 10px; align-items: flex-start;
+    border: 1px solid color-mix(in srgb, var(--warn) 32%, var(--border));
+    background: var(--warn-soft); color: var(--warn);
+    border-radius: 11px; padding: 12px 14px; margin-bottom: 12px;
+    font-size: 13px; line-height: 1.6;
+  }
+  .banner code {
+    background: var(--surface); border: 1px solid var(--border);
+    padding: 1px 5px; border-radius: 5px; font-size: 12px;
+  }
+  body[data-js="on"] .banner { display: none; }
+
+  /* The mirror image: advice about the save dialog is only useful on a page
+     that can actually reach it, so it appears only once the script runs. */
+  .save-hint { display: none; }
+  body[data-js="on"] .save-hint {
+    display: flex; gap: 9px; align-items: flex-start;
+    border: 1px dashed var(--border-strong); border-radius: 10px;
+    padding: 10px 13px; margin-top: 14px;
+    color: var(--muted); font-size: 12.5px; line-height: 1.65;
+  }
+  .save-hint code {
+    background: var(--surface-2, var(--bg)); border: 1px solid var(--border);
+    padding: 1px 5px; border-radius: 5px; font-size: 12px; color: var(--text);
+  }
+
+  .card {
+    background: var(--surface); border: 1px solid var(--border);
+    border-radius: var(--radius); box-shadow: var(--shadow);
+  }
+  .card-head {
+    display: flex; align-items: center; justify-content: space-between; gap: 12px;
+    padding: 16px 20px; border-bottom: 1px solid var(--border);
+  }
+  .card-head h2 { font-size: 15px; font-weight: 600; margin: 0; }
+  .card-head .desc { color: var(--muted); font-size: 12.5px; margin-top: 3px; }
+  .card-body { padding: 20px; }
+  .pill {
+    font-size: 11.5px; font-weight: 560; padding: 3px 9px; border-radius: 999px;
+    background: var(--surface-2); border: 1px solid var(--border); color: var(--muted);
+    white-space: nowrap;
+  }
+  .pill.ok { background: var(--ok-soft); border-color: transparent; color: var(--ok); }
+  .pill.warn { background: var(--warn-soft); border-color: transparent; color: var(--warn); }
+  .pill.bad { background: var(--danger-soft); border-color: transparent; color: var(--danger); }
+
+  .grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 16px 18px; }
+  @media (max-width: 640px) { .grid { grid-template-columns: 1fr; } }
+  .field { display: flex; flex-direction: column; gap: 6px; }
+  .field.wide { grid-column: 1 / -1; }
+  .field label { font-size: 12.5px; font-weight: 550; color: var(--muted); }
+  .field label .req { color: var(--danger); margin-left: 2px; }
+  input[type=text], input[type=password], input[type=number], select {
+    font: inherit; font-size: 13.5px; color: var(--text);
+    height: 38px; padding: 0 11px; width: 100%;
+    background: var(--surface-2);
+    border: 1px solid var(--border); border-radius: 9px;
+    outline: none; transition: border-color .14s, box-shadow .14s, background .14s;
+  }
+  input:focus, select:focus {
+    border-color: var(--accent); background: var(--surface);
+    box-shadow: 0 0 0 3px color-mix(in srgb, var(--accent) 16%, transparent);
+  }
+  input::placeholder { color: var(--faint); }
+  .hint { font-size: 11.5px; color: var(--faint); line-height: 1.45; }
+  .hint.warn { color: var(--warn); }
+  .pw-wrap { position: relative; }
+  .pw-wrap input { padding-right: 58px; }
+  .pw-toggle {
+    position: absolute; right: 5px; top: 5px; height: 28px; padding: 0 9px;
+    font: inherit; font-size: 11.5px; color: var(--muted); cursor: pointer;
+    background: var(--surface); border: 1px solid var(--border); border-radius: 7px;
+  }
+  .pw-toggle:hover { color: var(--text); }
+
+  .actions {
+    position: fixed; left: 0; right: 0; bottom: 0; z-index: 20;
+    background: color-mix(in srgb, var(--surface) 88%, transparent);
+    backdrop-filter: blur(12px); -webkit-backdrop-filter: blur(12px);
+    border-top: 1px solid var(--border);
+  }
+  .actions-inner {
+    max-width: 940px; margin: 0 auto; padding: 12px 24px;
+    display: flex; align-items: center; gap: 10px;
+  }
+  .actions .state { flex: 1 1 auto; font-size: 12.5px; color: var(--muted); min-width: 0; }
+  .btn {
+    appearance: none; cursor: pointer; font: inherit; font-size: 13px; font-weight: 560;
+    height: 36px; padding: 0 15px; border-radius: 9px;
+    border: 1px solid var(--border-strong); background: var(--surface); color: var(--text);
+    transition: background .14s, border-color .14s, opacity .14s;
+    white-space: nowrap;
+  }
+  .btn:hover { border-color: var(--faint); }
+  .btn.primary { background: var(--accent); border-color: var(--accent); color: #fff; }
+  .btn.primary:hover { background: var(--accent-hover); border-color: var(--accent-hover); }
+  .btn:disabled { opacity: .55; cursor: not-allowed; }
+
+  .toast {
+    position: fixed; left: 50%; bottom: 82px; transform: translate(-50%, 12px);
+    background: var(--text); color: var(--bg);
+    padding: 10px 16px; border-radius: 10px; font-size: 13px;
+    opacity: 0; pointer-events: none; transition: opacity .18s, transform .18s;
+    max-width: min(560px, calc(100vw - 48px)); z-index: 40; box-shadow: var(--shadow);
+  }
+  .toast.show { opacity: 1; transform: translate(-50%, 0); }
+  .toast.bad { background: var(--danger); color: #fff; }
+
+  .footnote {
+    margin-top: 22px; padding-top: 18px; border-top: 1px solid var(--border);
+    color: var(--faint); font-size: 12px; line-height: 1.7;
+  }
+  .footnote code {
+    background: var(--surface-2); border: 1px solid var(--border);
+    padding: 1px 5px; border-radius: 5px;
+  }
+  .sr { position: absolute; width: 1px; height: 1px; overflow: hidden; clip: rect(0 0 0 0); }
+</style>
+</head>
+<body>
+<div class="page">
+  <header class="top">
+    <div class="mark" aria-hidden="true">
+      <svg width="20" height="20" viewBox="0 0 20 20" fill="none">
+        <rect x="3" y="11" width="3.2" height="6" rx="1" fill="#fff" opacity=".55"/>
+        <rect x="8.4" y="7" width="3.2" height="10" rx="1" fill="#fff" opacity=".8"/>
+        <rect x="13.8" y="3" width="3.2" height="14" rx="1" fill="#fff"/>
+      </svg>
+    </div>
+    <div>
+      <h1>数据库连接配置</h1>
+      <div class="sub" id="subtitle">填写后保存本页，工具启动时会从这里读取配置</div>
+    </div>
+  </header>
+
+  <div class="banner">
+    <span class="ico">!</span>
+    <div>
+      <strong>输入框可以直接填，但「保存」这一步要浏览器执行脚本。</strong>
+      你看到这条提示，说明脚本没有跑起来（典型的例子是禁脚本的预览窗口）—— 那时点了保存不会有任何事情发生，
+      不是配置写错了。把这个文件用 Chrome / Edge 打开再填就能直接保存。
+      只能在预览窗口里操作的话，用 <code>credit-risk-config --serve</code> 起一个本机服务提交。
+    </div>
+  </div>
+
+  <div id="notices">/*NOTICES_HTML*/</div>
+
+  /*FORM_OPEN*/
+    <div class="tabs" role="tablist" aria-label="数据库类型">/*TABS_HTML*/</div>
+
+    <div class="panels">/*PANELS_HTML*/</div>
+
+    <section class="card" style="margin-top:16px">
+      <div class="card-head">
+        <div>
+          <h2>取数上限</h2>
+          <div class="desc">防止一次手滑把生产表整张拉下来，或把本地磁盘写满。</div>
+        </div>
+      </div>
+      <div class="card-body">
+        <div class="grid">/*LIMITS_HTML*/</div>
+      </div>
+    </section>
+  /*FORM_CLOSE*/
+
+  /*SAVE_HINT_HTML*/
+
+  <div class="footnote">
+    保存后，工具在启动时按此顺序查找配置：<code>config.json</code> →
+    <code>setup.html</code>（本页）→ <code>.env</code> → 内置默认值；而
+    <code>mcp.json</code> 里写死的环境变量优先级最高，会盖掉本页的值。<br>
+    本页把连接信息（含密码）以明文保存在文件里，请勿提交到 git 或转发给他人。
+  </div>
+</div>
+
+<div class="actions">
+  <div class="actions-inner">
+    <div class="state" id="state-line">/*STATE_LINE*/</div>
+    /*ACTIONS_HTML*/
+  </div>
+</div>
+
+<div class="toast" id="toast" role="status" aria-live="polite"></div>
+
+<script id="credit-agent-config" type="application/json">/*CONFIG_JSON*/</script>
+<script id="credit-agent-facts" type="application/json">/*FACTS_JSON*/</script>
+<script>
+(function () {
+  "use strict";
+
+  var configScript = document.getElementById("credit-agent-config");
+  var facts = JSON.parse(document.getElementById("credit-agent-facts").textContent || "{}");
+  var cfg = JSON.parse(configScript.textContent || "{}");
+  var form = document.getElementById("setup-form");
+  var spec = facts.spec || {};
+  var order = facts.order || Object.keys(spec);
+  var MODE = facts.mode || "file";
+
+  // Proves the script runs, which is what hides the "this page cannot save"
+  // banner in CSS. Kept off the saved copy so the next open tells the truth.
+  document.body.setAttribute("data-js", "on");
+
+  var $ = function (id) { return document.getElementById(id); };
+
+  function jsonText(obj) {
+    // A literal closing script tag inside a password would end this block early;
+    // escaping "<" as \u003c keeps the parsed value identical and hides the tag
+    // from the HTML parser. (Written with a backslash here for the same reason.)
+    return JSON.stringify(obj, null, 2).replace(/</g, "\\u003c");
+  }
+
+  function targetName() {
+    var parts = (facts.source_path || "setup.html").split(/[\\/]/);
+    return parts[parts.length - 1] || "setup.html";
+  }
+
+  function toast(message, bad) {
+    var el = $("toast");
+    el.textContent = message;
+    el.className = "toast show" + (bad ? " bad" : "");
+    clearTimeout(toast._t);
+    toast._t = setTimeout(function () { el.className = "toast"; }, bad ? 6000 : 3200);
+  }
+
+  // ---- read the form ----------------------------------------------------- //
+  // The DOM is the truth: the inputs are rendered by Python with their current
+  // values, so reading them back beats keeping a shadow copy in sync.
+  function collect() {
+    var out = {
+      version: 1,
+      active_backend: activeBackend(),
+      limits: {},
+      backends: {},
+      updated_at: ""
+    };
+    Object.keys(spec).forEach(function (name) { out.backends[name] = {}; });
+    if (!form) return out;
+    Array.prototype.forEach.call(form.querySelectorAll("[data-field]"), function (input) {
+      var backend = input.getAttribute("data-backend");
+      if (!out.backends[backend]) out.backends[backend] = {};
+      out.backends[backend][input.getAttribute("data-field")] = input.value;
+    });
+    Array.prototype.forEach.call(form.querySelectorAll("[data-limit]"), function (input) {
+      var text = input.value.trim();
+      if (text === "") return;
+      var number = Number(text);
+      if (!isNaN(number)) out.limits[input.getAttribute("data-limit")] = number;
+    });
+    return out;
+  }
+
+  function activeBackend() {
+    var picked = form && form.querySelector('input[name="backend"]:checked');
+    return (picked && picked.value) || cfg.active_backend || "duckdb";
+  }
+
+  function missingIn(backend, values) {
+    var one = spec[backend] || {};
+    return (one.required || []).filter(function (name) {
+      var value = values[name];
+      return value === undefined || value === null || String(value).trim() === "";
+    }).map(function (name) {
+      var field = (one.fields || []).filter(function (f) { return f.name === name; })[0];
+      return field ? field.label : name;
+    });
+  }
+
+  // ---- repaint ----------------------------------------------------------- //
+  function refresh() {
+    var data = collect();
+    order.forEach(function (name) {
+      var values = data.backends[name] || {};
+      var missing = missingIn(name, values);
+      var radio = $("tab-" + name);
+      var label = radio && radio.nextElementSibling;
+      var dot = label && label.querySelector(".dot");
+      if (dot) dot.className = "dot " + (missing.length === 0 ? "on" : "off");
+      var badge = document.querySelector("#panel-" + name + " [data-badge]");
+      if (badge) {
+        if (missing.length === 0) {
+          badge.className = "pill ok";
+          badge.textContent = name === "duckdb" ? "无需凭证" : "已填全";
+        } else {
+          // Count only: the full list is spelled out in the status line, and
+          // four joined labels would push the card header out of shape.
+          badge.className = "pill warn";
+          badge.textContent = "还缺 " + missing.length + " 项";
+        }
+      }
+    });
+
+    var active = activeBackend();
+    var text = (spec[active] || {}).label || active;
+    var missing = missingIn(active, data.backends[active] || {});
+    $("state-line").textContent = missing.length === 0
+      ? text + " 必填项已填全，记得点右侧保存"
+      : text + " 还缺：" + missing.join("、");
+  }
+
+  if (form) {
+    form.addEventListener("input", refresh);
+    form.addEventListener("change", refresh);
+  }
+
+  Array.prototype.forEach.call(document.querySelectorAll(".pw-toggle"), function (button) {
+    button.addEventListener("click", function () {
+      var input = button.parentNode.querySelector("input");
+      if (!input) return;
+      var hidden = input.type === "password";
+      input.type = hidden ? "text" : "password";
+      button.textContent = hidden ? "隐藏" : "显示";
+    });
+  });
+
+  // ---- save (static file mode only) -------------------------------------- //
+  // In serve mode the buttons are plain submit buttons; the server writes the
+  // file, so nothing here should intercept them.
+  function snapshotHtml() {
+    // Push the typed values into attributes first: the saved page is itself the
+    // form, so a stale value="" would show yesterday's numbers under today's
+    // settings. Selecting the active tab is preserved the same way.
+    Array.prototype.forEach.call(document.querySelectorAll("[data-field], [data-limit]"), function (input) {
+      if (input.tagName === "SELECT") {
+        Array.prototype.forEach.call(input.options, function (option) {
+          if (option.value === input.value) option.setAttribute("selected", "selected");
+          else option.removeAttribute("selected");
+        });
+      } else {
+        input.setAttribute("value", input.value);
+      }
+    });
+    // A clicked radio changes the property, not the attribute, so without this
+    // the saved page would reopen on whichever tab was active when it was
+    // generated — and that stale tab would then rewrite active_backend on the
+    // next save. Silently switching database is exactly the bug to avoid here.
+    Array.prototype.forEach.call(document.querySelectorAll('input[name="backend"]'), function (radio) {
+      if (radio.checked) radio.setAttribute("checked", "checked");
+      else radio.removeAttribute("checked");
+    });
+    $("toast").className = "toast";
+    document.body.removeAttribute("data-js");
+    var html = "<!DOCTYPE html>\n" + document.documentElement.outerHTML;
+    document.body.setAttribute("data-js", "on");
+    return html.replace(
+      /(<script\b[^>]*\bid="credit-agent-config"[^>]*>)[\s\S]*?(<\/script>)/i,
+      function (match, open, close) {
+        return open + jsonText(collect()) + close;
+      }
+    );
+  }
+
+  function download(html, name) {
+    var blob = new Blob([html], { type: "text/html;charset=utf-8" });
+    var url = URL.createObjectURL(blob);
+    var link = document.createElement("a");
+    link.href = url;
+    link.download = name;
+    document.body.appendChild(link);
+    link.click();
+    document.body.removeChild(link);
+    setTimeout(function () { URL.revokeObjectURL(url); }, 4000);
+  }
+
+  async function save() {
+    var html = snapshotHtml();
+    var name = targetName();
+
+    // Only Chromium writes back in place, and only after a real click. Nothing
+    // here needs a server: the dialog hands this page a writable file handle and
+    // the page overwrites itself. "id" makes Chrome reopen the same folder next
+    // time, so only the first save needs the path.
+    if (window.showSaveFilePicker) {
+      try {
+        var handle = await window.showSaveFilePicker({
+          id: "credit-agent-setup",
+          suggestedName: name,
+          types: [{ description: "配置文件", accept: { "text/html": [".html"] } }]
+        });
+        var writable = await handle.createWritable();
+        await writable.write(new Blob([html], { type: "text/html;charset=utf-8" }));
+        await writable.close();
+        toast("已覆盖 " + name + "。重启客户端后生效。");
+        return;
+      } catch (error) {
+        if (error && error.name === "AbortError") return;
+        // Fall through: some browsers expose the API but block it on file://
+      }
+    }
+
+    download(html, name);
+    toast("已下载到「下载」文件夹。接着在终端运行 credit-risk-config --adopt，"
+      + "它会把这个文件装到 ~/.credit-agent/ 并备份旧版。", true);
+  }
+
+  if (MODE === "file") {
+    var saveButton = $("btn-save");
+    if (saveButton) {
+      saveButton.addEventListener("click", function () {
+        save().catch(function (error) {
+          toast("保存失败：" + (error && error.message ? error.message : error), true);
+        });
+      });
+    }
+    var copyButton = $("btn-copy");
+    if (copyButton) {
+      copyButton.addEventListener("click", function () {
+        var text = jsonText(collect());
+        if (navigator.clipboard && navigator.clipboard.writeText) {
+          navigator.clipboard.writeText(text).then(
+            function () { toast("JSON 已复制，可粘贴进 config.json"); },
+            function () { toast("复制失败，请手动选取", true); }
+          );
+          return;
+        }
+        toast("当前环境不允许剪贴板访问", true);
+      });
+    }
+  }
+
+  if (facts.source_path) {
+    $("subtitle").innerHTML = "";
+    $("subtitle").appendChild(document.createTextNode("保存到 "));
+    var where = document.createElement("code");
+    where.textContent = facts.source_path;
+    $("subtitle").appendChild(where);
+    $("subtitle").appendChild(document.createTextNode("，工具启动时读取"));
+  }
+
+  refresh();
+})();
+</script>
+</body>
+</html>

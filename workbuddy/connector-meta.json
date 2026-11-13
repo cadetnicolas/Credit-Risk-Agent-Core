@@ -1,0 +1,22 @@
+{
+  "name": "信贷分析工具",
+  "name_zh": "信贷分析工具",
+  "name_en": "Credit Risk Analysis Tools",
+  "description": "MCP tools and Skills for governed credit data analysis, policy research, and scorecard modeling.",
+  "description_zh": "连接本地信贷分析工具，按口径完成数据准入、组合监控、策略研究和评分卡建模验证。",
+  "description_en": "Connect local credit tools: governed admission, monitoring, policy research, scorecard validation.",
+  "source": "credit-risk-analysis",
+  "type": "mcp",
+  "version": "0.6.1",
+  "minWorkbuddyVersion": "4.24.0",
+  "examples_zh": [
+    "检查信贷样本的成熟度和已签收指标口径",
+    "分析存量组合变化并定位有证据支持的客群",
+    "在成熟样本上比较策略阈值并标注验证范围",
+    "按 OOT 流程开发评分卡并生成模型验证产物"
+  ],
+  "examples_en": [
+    "Check credit sample maturity and bind a signed metric",
+    "Analyze portfolio changes and locate supported segments"
+  ]
+}

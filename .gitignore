@@ -1,0 +1,56 @@
+# --- Python ---
+__pycache__/
+*.py[cod]
+*.so
+*.egg-info/
+.eggs/
+build/
+dist/
+*.whl
+
+# --- 虚拟环境 ---
+.venv/
+venv/
+.env/
+env/
+
+# --- 测试与静态检查缓存 ---
+.pytest_cache/
+.pytest-tmp/
+.ruff_cache/
+.mypy_cache/
+.coverage
+.coverage.*
+htmlcov/
+coverage.xml
+
+# --- 本地配置与凭证：一律不入库 ---
+.env
+.env.*
+!.env.example
+# 本地私有连接配置（host / 账号 / 密码），由使用者自己创建
+tools/holo_config.py
+
+# --- 运行期产物：数据快照、口径登记、分析账本一律不进仓库 ---
+/workspace/
+/ledger/
+/registries/
+*.parquet
+*.duckdb
+*.log
+
+# --- 构建出的连接器包 ---
+*-connector/
+*-connector.zip
+
+# --- 系统与编辑器 ---
+.DS_Store
+Thumbs.db
+.idea/
+.vscode/
+*.swp
+
+# --- 宿主平台本地状态（WorkBuddy 等 Agent 客户端的会话与记忆目录）---
+.workbuddy/
+.claude/
+.cursor/

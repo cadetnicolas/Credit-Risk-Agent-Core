@@ -1,0 +1,13 @@
+recursive-include skills *
+recursive-include workbuddy *
+recursive-include scripts *.py
+recursive-include tools *.py
+recursive-include docs *.md *.html
+recursive-include tests *.py *.xls
+# The setup page is data, not code: an sdist without it installs a module that
+# cannot render anything.
+recursive-include src/credit_agent/config *.html
+include LICENSE
+include README.md
+include CONTRIBUTING.md
+include .env.example

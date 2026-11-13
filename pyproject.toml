@@ -1,0 +1,84 @@
+[build-system]
+requires = ["setuptools>=68", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "credit-risk-agent-core"
+version = "0.6.1"
+description = "Platform-independent credit analytics, modeling, Skills and MCP tools."
+readme = "README.md"
+requires-python = ">=3.11"
+license = { text = "MIT" }
+keywords = ["credit-risk", "scorecard", "risk-modeling", "mcp", "vintage", "woe"]
+classifiers = [
+    "Development Status :: 4 - Beta",
+    "Intended Audience :: Financial and Insurance Industry",
+    "License :: OSI Approved :: MIT License",
+    "Programming Language :: Python :: 3.11",
+    "Programming Language :: Python :: 3.12",
+    "Programming Language :: Python :: 3.13",
+    "Topic :: Office/Business :: Financial",
+]
+dependencies = [
+    "pandas>=2.2",
+    "numpy>=1.26",
+    "scikit-learn>=1.5",
+    "pyarrow>=14.0",
+    "openpyxl>=3.1.5",
+    "xlrd>=2.0.1",
+    "pydantic>=2.9",
+    "PyYAML>=6",
+]
+
+[project.optional-dependencies]
+odps = ["pyodps>=0.12.0"]
+# PostgreSQL and Hologres share the wire protocol, so one driver covers both.
+pg = ["psycopg2-binary>=2.9"]
+mysql = ["pymysql>=1.1"]
+# Every warehouse backend in one install: `pip install credit-risk-agent-core[warehouse]`
+warehouse = ["pyodps>=0.12.0", "psycopg2-binary>=2.9", "pymysql>=1.1"]
+lightgbm = ["lightgbm>=4.0"]
+mcp = ["mcp>=1.30,<2", "PyYAML>=6"]
+research = ["matplotlib>=3.8", "duckdb>=1.1"]
+dev = ["pytest>=8", "mcp>=1.30,<2", "PyYAML>=6", "matplotlib>=3.8", "duckdb>=1.1"]
+
+[project.scripts]
+credit-risk-mcp = "credit_agent.mcp_server:main"
+credit-risk-config = "credit_agent.config.setup_page:main"
+
+[tool.setuptools.packages.find]
+where = ["src"]
+include = ["credit_agent*"]
+
+# The setup page is a data file, not code: without this a wheel install would
+# ship the module and none of the HTML it renders.
+[tool.setuptools.package-data]
+credit_agent = ["config/*.html"]
+
+# data-files globs are flattened to basenames, so each destination directory is
+# declared explicitly to preserve the skills/ tree and avoid SKILL.md collisions.
+[tool.setuptools.data-files]
+"share/credit-risk-agent/skills/credit-data-admission" = ["skills/credit-data-admission/SKILL.md"]
+"share/credit-risk-agent/skills/credit-data-admission/references" = ["skills/credit-data-admission/references/*.md"]
+"share/credit-risk-agent/skills/portfolio-anomaly-attribution" = ["skills/portfolio-anomaly-attribution/SKILL.md"]
+"share/credit-risk-agent/skills/portfolio-anomaly-attribution/references" = ["skills/portfolio-anomaly-attribution/references/*.md"]
+"share/credit-risk-agent/skills/policy-cutoff-simulation" = ["skills/policy-cutoff-simulation/SKILL.md"]
+"share/credit-risk-agent/skills/policy-cutoff-simulation/references" = ["skills/policy-cutoff-simulation/references/*.md"]
+"share/credit-risk-agent/skills/scorecard-modeling-pipeline" = ["skills/scorecard-modeling-pipeline/SKILL.md"]
+"share/credit-risk-agent/skills/scorecard-modeling-pipeline/references" = ["skills/scorecard-modeling-pipeline/references/*.md"]
+"share/credit-risk-agent/skills/deliverable-html-report" = ["skills/deliverable-html-report/SKILL.md"]
+"share/credit-risk-agent/skills/deliverable-html-report/references" = ["skills/deliverable-html-report/references/*.md"]
+"share/credit-risk-agent/workbuddy" = ["workbuddy/*.md", "workbuddy/*.json", "workbuddy/*.svg", "workbuddy/*.py"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+pythonpath = ["src"]
+
+[tool.ruff]
+target-version = "py311"
+line-length = 120
+src = ["src"]
+
+[tool.ruff.lint]
+select = ["E", "F", "W"]
+ignore = ["E501"]

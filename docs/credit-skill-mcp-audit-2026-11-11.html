@@ -1,0 +1,272 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>信贷策略分析建模 SKILL / MCP 完备性复核报告</title>
+<style>
+  :root {
+    --bg: #f7f8fa; --card: #ffffff; --ink: #1c2430; --muted: #5b6675;
+    --line: #e3e7ed; --accent: #1f5fa8; --p0: #c0392b; --p1: #b7791f; --p2: #2c7a5b;
+    --chip: #eef3f9;
+  }
+  * { box-sizing: border-box; }
+  body { margin: 0; background: var(--bg); color: var(--ink);
+    font: 15px/1.75 -apple-system, BlinkMacSystemFont, "PingFang SC", "Microsoft YaHei", sans-serif; }
+  .wrap { max-width: 1080px; margin: 0 auto; padding: 40px 28px 72px; }
+  header { border-bottom: 3px solid var(--accent); padding-bottom: 22px; margin-bottom: 30px; }
+  h1 { font-size: 27px; margin: 0 0 10px; letter-spacing: .3px; }
+  .sub { color: var(--muted); font-size: 14px; }
+  .verdict { margin-top: 20px; padding: 16px 20px; background: #fff; border-left: 4px solid var(--accent);
+    border-radius: 4px; box-shadow: 0 1px 3px rgba(20,30,50,.06); }
+  .verdict strong { color: var(--accent); }
+  h2 { font-size: 20px; margin: 40px 0 14px; padding-left: 11px; border-left: 4px solid var(--accent); }
+  h3 { font-size: 16px; margin: 26px 0 10px; }
+  p { margin: 8px 0; }
+  table { width: 100%; border-collapse: collapse; background: var(--card); font-size: 14px;
+    box-shadow: 0 1px 3px rgba(20,30,50,.05); }
+  th, td { border: 1px solid var(--line); padding: 10px 12px; text-align: left; vertical-align: top; }
+  th { background: #f0f4f9; font-weight: 600; }
+  code { font-family: "SF Mono", Menlo, Consolas, monospace; font-size: 12.5px;
+    background: var(--chip); padding: 1px 5px; border-radius: 3px; color: #234; }
+  .item { background: var(--card); border: 1px solid var(--line); border-radius: 6px;
+    padding: 16px 20px; margin: 14px 0; box-shadow: 0 1px 3px rgba(20,30,50,.05); }
+  .item h3 { margin: 0 0 8px; font-size: 16px; }
+  .tag { display: inline-block; font-size: 12px; font-weight: 700; color: #fff;
+    padding: 1px 9px; border-radius: 10px; margin-right: 9px; vertical-align: 2px; }
+  .t0 { background: var(--p0); } .t1 { background: var(--p1); } .t2 { background: var(--p2); }
+  .lbl { color: var(--muted); font-weight: 600; }
+  .item p { margin: 6px 0; }
+  ul { margin: 8px 0; padding-left: 22px; } li { margin: 5px 0; }
+  .ok { color: var(--p2); font-weight: 600; }
+  .warn { color: var(--p1); font-weight: 600; }
+  .bad { color: var(--p0); font-weight: 600; }
+  .foot { margin-top: 46px; padding-top: 18px; border-top: 1px solid var(--line);
+    color: var(--muted); font-size: 13px; }
+  .grid { display: grid; grid-template-columns: repeat(2, 1fr); gap: 14px; }
+  @media (max-width: 760px) { .grid { grid-template-columns: 1fr; } }
+</style>
+</head>
+<body>
+<div class="wrap">
+
+<header>
+  <h1>信贷策略分析建模 SKILL / MCP 完备性复核</h1>
+  <div class="sub">项目：<code>credit_risk_agent</code> · 复核日期：2026-11-11 · 范围：<code>skills/</code>、<code>src/credit_agent/tools/</code>、<code>mcp_server.py</code>、<code>workbuddy/</code>、<code>tests/</code>、<code>docs/</code>、打包与安装配置</div>
+  <div class="verdict">
+    <strong>状态说明：本报告是 2026-11-11 修复前的只读复核快照</strong>，文中引用的 <code>docs/</code> 路径为当时的目录布局；历史设计稿现已移入 <code>docs/archive/</code>，问题已按 v0.3 修复，修复结果见 <code>docs/skill-mcp-validation-2026-11-11.md</code> 的复核章节。<br><br>
+    <strong>修复前结论：接口骨架已开发完备，业务口径、治理闭环与部署就绪度尚未完备。</strong><br>
+    4 个 SKILL 与 11 个 MCP 工具一一对应，envelope 状态机、路径白名单、OOT 优先、特征审批闸门等核心机制均已落地且 142 项测试全绿。
+    但按「可对外交付、可上线、可审计」的标准，仍存在 <strong>7 项 P0 阻断项</strong>（含 3 处信贷业务红线/口径偏差、异常脱离契约、Connector 在当前环境无法启动、审批适配器缺失、账本边界），
+    以及契约枚举、业务能力、发布规范与文档治理等 P1 项。当前定位应是<strong>本地试点原型</strong>，不宜作为准出版本。
+  </div>
+</header>
+
+<h2>一、分层评估与已验证事实</h2>
+<table>
+  <tr><th style="width:22%">层次</th><th style="width:14%">评估</th><th>依据</th></tr>
+  <tr><td>接口与骨架</td><td class="ok">完备</td><td>4 个 SKILL 的 <code>allowed-tools</code> 并集 10 个业务工具全部由 <code>mcp_server.py</code> 注册，另有 <code>list_credit_datasets</code> 共 11 个；<code>record_human_decision</code> 有意不暴露给 Agent；FastMCP 类型注解生成的 schema 正确；stdio 通道无 stdout 污染。</td></tr>
+  <tr><td>业务流程与红线</td><td class="bad">未完备</td><td>拒绝推断边界、规则挖掘字段约束、成熟度 T0 口径三处与 SKILL 声明不一致（P0-1 ~ P0-3）；盈亏平衡模式 C、完整 Swap Set 2×2 矩阵未实现。</td></tr>
+  <tr><td>治理与审计闭环</td><td class="bad">未完备</td><td>3 个人工审批 gate 只写不读；确认单可重放/覆盖；账本无租户隔离与文件权限；异常路径不返回结构化 envelope。</td></tr>
+  <tr><td>部署与发布就绪</td><td class="warn">部分</td><td>当前 <code>../.venv</code> 内 <code>credit_agent</code> 不可导入，<code>python -m credit_agent.mcp_server</code> 启动失败；Connector 元数据缺 <code>minWorkbuddyVersion</code>、英文描述超长、三处版本号不一致；打包器不做可导入性探测。</td></tr>
+  <tr><td>测试与文档</td><td class="warn">部分</td><td><code>142 passed / 0 failed / 0 skipped</code>（实测复跑）；但测试集中在领域层，MCP facade 与打包脚本覆盖薄弱；7 份旧设计/PRD 与现行实现混放，两份验证报告数值冲突。</td></tr>
+</table>
+
+<h3>已确认完备的要点</h3>
+<ul>
+  <li>工具名、<code>status</code> 四值枚举、多数 <code>block_code</code> 产生点、gate 白名单（<code>feature_list / anomaly_disposition / model_signoff / policy_trial / validation_fallback</code>）与 SKILL 一致。</li>
+  <li>数据根边界稳健：绝对路径、<code>../</code>、越界符号链接、非法后缀均被拒绝；registry 使用 <code>yaml.safe_load</code>。</li>
+  <li>OOT 优先与特征审批绑定严格：非 <code>oot</code> 切分走 <code>needs_human</code>；<code>train_and_evaluate_candidate</code> 校验审批卡 channel 与入模特征必须是筛选结果子集；跨快照/跨参数复用确认单已被挡住。</li>
+  <li>数学口径：Shift-Share 三分法、双侧小样本门槛、两比例 z 检验除零保护、IV/PSI/相关系数/PDO 等阈值与 SKILL 一致；报告引证用 Decimal 按展示精度核对。</li>
+  <li>公开数据脚本可复跑，输出与 <code>docs/skill-mcp-validation-2026-11-11.md</code> 记录一致（35,601 行 / 64 笔 / AUC 0.974513 / KS 0.822966；HELOC 9,861 行 / 52.0028%）。</li>
+</ul>
+
+<h2>二、P0：发布前必须修复的阻断项</h2>
+
+<div class="item">
+  <h3><span class="tag t0">P0-1</span>拒绝推断红线：<code>swap_in_bad_rate</code> 未固定为「未知」</h3>
+  <p><span class="lbl">证据：</span><code>src/credit_agent/tools/policy.py:218-219</code> 把 <code>swap["swap_in"]["bad_rate"]</code> 原样写入摘要；<code>src/credit_agent/analytics/strategy.py:254, 382-398</code> 的 <code>swap_in</code> 是「已放款样本中未过现行阈值、但过候选阈值」的行，这些行本身带 bad 标记，因此 <code>_outcome_block</code> 会返回非空坏账率。</p>
+  <p><span class="lbl">冲突：</span><code>skills/policy-cutoff-simulation/SKILL.md:42, 99</code> 要求 <code>swap_in_bad_rate</code> 固定为空、正文写「未知」；<code>:29</code> 是核心红线「严禁估算放宽后新增通过客群的真实坏账率」。实现给出的是「已放款样本跨阈值带」的实测坏账率，语义上极易被 Agent 误引用为「被拒客群调入集」的坏账率。</p>
+  <p><span class="lbl">建议：</span>在 <code>simulate_policy_rules</code> 层强制 <code>swap_in_bad_rate = None</code>；<code>swap_in</code> 只返回笔数；补齐 <code>keep_rejected</code> 块与「矩阵下半行不在样本内」声明；保留现有 caveat 但不输出数字。</p>
+</div>
+
+<div class="item">
+  <h3><span class="tag t0">P0-2</span>规则挖掘默认扫描全表列，无决策时点字段门禁</h3>
+  <p><span class="lbl">证据：</span><code>mcp_server.py:132-142</code> 的 <code>features</code> 默认 <code>None</code>；<code>policy.py:264, 270-274</code> 直接透传；<code>analytics/rules.py:31</code> 的 <code>feats = features or df.columns</code> 在缺省时取全表列（仅排除 bad 与时间列）。<code>simulate_policy_rules</code> 从不读取 <code>resolve_metric_and_dimensions</code> 绑定的 decision 维度表，policy 实现中 <code>TIME_POINT_VIOLATION</code> / <code>DIMENSION_UNREGISTERED</code> 产生点为 0。</p>
+  <p><span class="lbl">影响：</span>贷后 DPD、催收、观察时点结果、标签衍生列都可能被挖成「拦截规则」，构成典型的目标穿越；SKILL <code>:31, 55-56</code> 的字段约束只靠 Agent 自觉遵守，工具层无防线。另 <code>rules.py:55-58</code> 只有覆盖率比例门槛、无 <code>n ≥ 50</code> 绝对命中量门槛，<code>policy.py:188</code> 的 <code>trials</code> 统计的是过滤后 TopN 而非总搜索候选数。</p>
+  <p><span class="lbl">建议：</span><code>features</code> 设为必填并校验为绑定登记的 <code>point_in_time=decision</code> 维度子集；取消 <code>mine_rules</code> 的全表回退；补 <code>min_hits</code> 与真实 trials 统计；对越界字段返回对应 block_code。</p>
+</div>
+
+<div class="item">
+  <h3><span class="tag t0">P0-3</span>成熟度判定用「批次月末 + W 月」，与 SKILL 的 T0 + W 口径不一致</h3>
+  <p><span class="lbl">证据：</span><code>tools/admission.py:178-183</code> 的 docstring 明确写「A cohort … is mature when its month-end plus W months is on or before the snapshot cutoff」；<code>:214-227</code> 完全按 cohort 标签解析月末计算，<code>decision_time_column</code> 在 <code>:206-207</code> 只做列存在性检查；FPD 天数窗口被 <code>days/30</code> 向上取整成月。</p>
+  <p><span class="lbl">影响：</span>SKILL <code>:56</code> 与 <code>references/data-contract-and-windows.md:25-27</code> 要求按每笔决策时点 T0 判断 <code>T0 + W ≤ T_cutoff</code>。当前算法方向偏保守（不会把未成熟误判为成熟），但会系统性低估可用成熟样本，且「FPD30 = 首期账单日后 30 天」被改写为「月末 + 1 月」，与已签收口径不符；摘要也未记录实际使用的 T0 与截止日供复核。</p>
+  <p><span class="lbl">建议：</span>按批次取 <code>decision_time_column</code> 的最晚 T0 计算成熟；日窗口与月窗口分别处理；在摘要写入实际 T0 列、截止日与判定依据。</p>
+</div>
+
+<div class="item">
+  <h3><span class="tag t0">P0-4</span>11 个 MCP 工具均无异常兜底，异常脱离 envelope 契约</h3>
+  <p><span class="lbl">证据：</span><code>mcp_server.py:54-158</code> 所有 <code>@server.tool</code> 函数体无 <code>try/except</code>。可达路径包括：文件不存在/非法后缀（<code>:33-37</code>）、口径 JSON/YAML 解析失败（<code>:88-89</code>）、registry 缺字段（<code>admission.py:618-625</code>）、无效 <code>run_id</code>（<code>modeling_ops.py:312, 462</code>、<code>portfolio.py:170</code>）、非法 <code>mode</code>（<code>policy.py:256</code>）、cutoff 缺 <code>score/edges</code>（<code>policy.py:199</code>）。尤其 <code>modeling_ops.py:526-533</code> 把小样本、类别单一等常见业务情形一律 <code>raise ValueError</code>。</p>
+  <p><span class="lbl">影响：</span>真实 MCP 调用实测返回 <code>ToolError</code> 文本而非 <code>{status, block_code}</code>，4 个 SKILL 的停机处置表对此完全失效；Agent 无法区分「文件不存在」「口径未签收」「需要人工」，容易重试或编造结论。</p>
+  <p><span class="lbl">建议：</span>在 <code>create_server</code> 统一包裹 tool 函数，把可预期异常映射为 blocked envelope 与明确 block_code；把 <code>train_classifier</code> 的各类 error 映射到 <code>VALIDATION_UNAVAILABLE</code> / <code>BASELINE_UNAVAILABLE</code>；自由形态 dict 参数改用 pydantic/TypedDict 生成强 schema。</p>
+</div>
+
+<div class="item">
+  <h3><span class="tag t0">P0-5</span>Connector 在当前环境无法启动，打包器不做可导入性校验</h3>
+  <p><span class="lbl">实测：</span>在项目根用 <code>../.venv/bin/python</code> 执行 <code>find_spec("credit_agent") → None</code>，<code>python -m credit_agent.mcp_server --help</code> 报 <code>ModuleNotFoundError</code>；该 venv 已装 <code>mcp</code>、<code>yaml</code>，但安装的是另一个分发 <code>credit-agent-tools</code>，并非 <code>credit-risk-agent-core</code>。测试之所以全绿，是因为 <code>tests/test_mcp_server.py:74</code> 手工注入了 <code>PYTHONPATH=src</code>。</p>
+  <p><span class="lbl">证据：</span><code>workbuddy/build_connector.py:28-29</code> 只校验 python 可执行文件存在，不校验 <code>import credit_agent</code> 与 <code>mcp</code> 依赖；生成的 <code>mcp.json</code>（<code>:42-57</code>）用 <code>-m credit_agent.mcp_server</code> 且无 <code>env</code>，<code>cwd</code> 指向项目根对 <code>src/</code> 布局无效（包必须已安装）。</p>
+  <p><span class="lbl">影响：</span>按当前状态生成的 Connector 导入 WorkBuddy 后会启动失败且不易诊断；文档「安装到同一 Python 环境」是隐含前置条件，缺少强制校验。另 <code>mcp_server.py:15</code> 顶层 <code>import yaml</code>，而 PyYAML 只在 <code>[mcp]</code> extra（<code>pyproject.toml:25</code>），导致 <code>:45</code> 的友好提示不可达。</p>
+  <p><span class="lbl">建议：</span>打包器增加 <code>python -c "import credit_agent, mcp, yaml"</code> 预检；把 PyYAML 提升为核心依赖或延迟导入；修正/移除误导性 <code>cwd</code>；文档把 <code>pip install -e '.[mcp]'</code> 写成硬前置。</p>
+</div>
+
+<div class="item">
+  <h3><span class="tag t0">P0-6</span>人工审批闭环未交付，且 3 个 gate「只写不读」</h3>
+  <p><span class="lbl">证据：</span><code>tools/evidence.py:15, 40-64</code> 定义 5 个 gate，但 <code>get_decision</code> 全库调用点仅 <code>modeling_ops.py:145, 467</code> 与 <code>policy.py:281</code>（<code>validation_fallback</code> / <code>feature_list</code>）。<code>anomaly_disposition</code>、<code>policy_trial</code>、<code>model_signoff</code> 无任何工具层消费；模型卡状态在 <code>modeling_ops.py:447</code> 硬编码 <code>"status": "candidate"</code>，从不检查签收。</p>
+  <p><span class="lbl">影响：</span>SKILL <code>portfolio:71</code>、<code>policy:62</code>、<code>scorecard:67, 128</code> 要求这些 gate 决定能否立项/签收/写「已批准」，实际只靠 Agent 自觉遵守文本。叠加「宿主审批卡适配器未提供」（文档已披露），所有 <code>needs_human</code> 回退路径在 WorkBuddy 中无法闭环，训练停在 <code>FEATURE_REVIEW_REQUIRED</code>。</p>
+  <p><span class="lbl">建议：</span>提供一个参考宿主适配器（把审批卡写入同一 ledger 的受信任接口）；在处置立项、试验签收、报告提交路径读取决定并据此放行或停 <code>needs_human</code>；模型卡状态由 <code>model_signoff</code> 决定。</p>
+</div>
+
+<div class="item">
+  <h3><span class="tag t0">P0-7</span>账本边界与审计属性不足</h3>
+  <p><span class="lbl">证据：</span><code>mcp_server.py:47-51</code> 对 <code>data_root</code>/<code>registry_root</code> 做 <code>resolve(strict=True)</code> + <code>is_dir()</code>，唯独 <code>ledger_root</code> 直接传入且未校验与另两个根互不相交。若管理员把账本放在数据根子目录，<code>list_credit_datasets</code> 的 <code>rglob</code>（<code>:57-59</code>）会把 <code>ledger/frames/*.parquet</code>（<code>ledger.py:67-69</code> 保存的完整明细）列为可用数据集，Agent 可绑定读取，绕过准入与成熟度闸门。</p>
+  <p><span class="lbl">其它：</span>目录/文件未设 <code>0o700/0o600</code>；<code>save_frame/load_frame/save_run</code> 用外部 id 直接拼路径（<code>ledger.py:68, 73, 150, 176</code>）且无白名单；<code>decisions</code> 表 <code>PRIMARY KEY(gate, review_id)</code> + <code>INSERT OR REPLACE</code>（<code>:55-58, 180-186</code>），无时间戳、无 <code>consumed</code> 标记，同一确认单可无限重放、payload 可被覆盖；无 tenant 命名空间，任一会话拿到他人 <code>run_id</code> 即可读摘要与帧。</p>
+  <p><span class="lbl">建议：</span>启动时断言三个根目录两两互不相交并统一 resolve/权限检查；id 加白名单并 <code>is_relative_to</code> 校验；确认单改为追加只写 + 一次性消费标记；按租户分库分进程，或由宿主注入受信任 tenant 上下文。</p>
+</div>
+
+<h2>三、P1：契约一致性与业务能力缺口</h2>
+
+<div class="grid">
+  <div class="item">
+    <h3><span class="tag t1">P1-A</span>阻断码双向不一致</h3>
+    <ul>
+      <li><code>DIMENSION_UNREGISTERED</code>：两个 SKILL 声明，<code>tools/</code> 全目录 0 处产生。</li>
+      <li><code>TIME_POINT_VIOLATION</code>：3 个 SKILL 声明，仅 <code>portfolio.py:215</code> 产生（且因 binding 已过滤为 decision-only，正常配置下不可达）；policy / modeling 无产生点。</li>
+      <li>实现返回 <code>VALIDATION_CHOICE_REQUIRED</code>、<code>USER_CHOSE_STOP</code>（<code>policy.py:279, 288</code>、<code>modeling_ops.py:137-149</code>），4 个 SKILL 码表均未列；policy 用 <code>RANDOM_SPLIT_FORBIDDEN</code>、portfolio 用 <code>SNAPSHOT_INVALID</code> 属跨 SKILL 串码。</li>
+      <li>portfolio 的 <code>LABEL_IMMATURE</code> 实际由 <code>ADMISSION_REQUIRED</code> 代替。</li>
+    </ul>
+    <p><span class="lbl">建议：</span>抽 <code>tools/codes.py</code> 单一枚举，加「SKILL 声明码 ⊆ 代码常量」的回归测试，统一码表后再版 SKILL。</p>
+  </div>
+
+  <div class="item">
+    <h3><span class="tag t1">P1-B</span>摘要契约字段与 SKILL / 引证工具错位</h3>
+    <ul>
+      <li><code>modeling_ops.py:249</code> 返回扁平 <code>split_method</code>，SKILL <code>:63</code> 要求 citation <code>path: split.method</code> → <code>evidence.py:67-79</code> 取不到值。</li>
+      <li><code>modeling_ops.py:387-410</code>：返回给 Agent 的 <code>public.selected</code> 是字符串列表，落账 <code>saved.selected</code> 是 dict 列表；<code>verify_and_commit_report</code> 校验的是落账 summary，按可见摘要写引用会因非数字被 <code>REPORT_UNTRACED</code>。</li>
+      <li><code>evidence.py:17-28</code> 数字正则无纯整数分支（「共 2000 笔」不进入未引用检查），而 <code>:82-87</code> 的 <code>_is_number</code> 拒收字符串，导致 SKILL <code>credit-data-admission:60</code> 要求「日期也提交 citations」时反而必然失败。</li>
+      <li><code>admission.py:246</code> 的 <code>mask_id</code> 直接等于 <code>snapshot_id</code>，与 SKILL 暗示的独立掩码标识不符。</li>
+    </ul>
+  </div>
+
+  <div class="item">
+    <h3><span class="tag t1">P1-C</span>策略能力未交付完整</h3>
+    <ul>
+      <li>模式 C 盈亏平衡：<code>economics</code> 只在库函数签名（<code>policy.py:242</code>），MCP 未暴露；<code>_economics_caveat</code>（<code>:120-130</code>）只返回一句 caveat，不计算各档边际期望净收益、不标注 <code>r_break-even</code> 建议切点（SKILL <code>:73-75, 91</code>）。</li>
+      <li>Swap Set 只有 3 块，缺 <code>keep_rejected</code>；缺激进/平衡/温和三档候选与《冠军挑战者试验设计单》（SKILL <code>:94-107</code>）。</li>
+      <li><code>inspect_and_bind_snapshot</code> 的 <code>weight_column</code> 只登记不使用（<code>admission.py:98-99, 152</code>），下游权重来自 metric 绑定。</li>
+    </ul>
+  </div>
+
+  <div class="item">
+    <h3><span class="tag t1">P1-D</span>登记维度与阈值被硬编码/静默替换</h3>
+    <ul>
+      <li><code>portfolio.py:160-165, 517-567</code> 从 binding 读出的维度 spec 只取 <code>column</code>/<code>point_in_time</code>，登记表的 <code>max_cardinality / min_cell_n / bins / cut_points</code> 全部丢弃；下钻一律用全局 <code>min_n=50, min_events=5</code>。SKILL 要求「事先登记的固定分档刀口」。</li>
+      <li><code>min_n / min_events / contribution_floor / alpha / min_iv / max_feature_psi / max_features / random_state</code> 均未在 MCP 暴露。</li>
+      <li><code>base_periods / comp_periods</code> MCP 声明可省略（<code>mcp_server.py:94-96</code>），SKILL <code>:59</code> 要求必填；省略会抛异常，期次不匹配时 <code>analytics/windows.py:27-33</code> 静默回退「最后 3 期 vs 之前」，用户指定期次被丢弃。</li>
+      <li><code>portfolio.py:97-105, 339</code> 部分视图缺列或不可比时仍返回 <code>ok</code>；<code>closure_error</code>（<code>:257</code>）只展示不校验，reference 要求 &lt; 1e-9。</li>
+    </ul>
+  </div>
+</div>
+
+<div class="item">
+  <h3><span class="tag t1">P1-E</span>发布规范、版本与依赖</h3>
+  <table>
+    <tr><th>问题</th><th>证据</th><th>影响 / 建议</th></tr>
+    <tr><td>版本三处不一致</td><td><code>pyproject.toml:7</code>=0.2.0；<code>src/credit_agent/__init__.py:3</code>=0.1.0；<code>workbuddy/connector-meta.json:10</code>=0.1.0</td><td>无法判断 Connector 对应哪份代码；建议由打包器从 pyproject 注入版本并输出兼容清单。</td></tr>
+    <tr><td>缺 <code>minWorkbuddyVersion</code></td><td>使用了 <code>name_zh/name_en/examples_zh/examples_en</code>（官方 4.24.0 字段）与 <code>mcp.json</code> 的 <code>cwd</code>（4.22.15），meta 未声明最低版本</td><td>低版本客户端忽略版本化字段；按官方规范应声明 ≥ 4.24.0。</td></tr>
+    <tr><td><code>description_en</code> 超长</td><td>实测 105 字符，官方要求 20–100</td><td>市场审核可能退回；同时 <code>examples_en</code> 仅 2 条（合规下限）。</td></tr>
+    <tr><td>排障表包名错误</td><td><code>docs/workbuddy-skill-mcp-integration-guide.md:143</code> 写 <code>credit[mcp]</code></td><td>不存在的包名，应改为 <code>credit-risk-agent-core[mcp]</code> 或 <code>.[mcp]</code>。</td></tr>
+    <tr><td>依赖 extra 错配</td><td><code>pyproject.toml:25-26</code>：<code>dev=["pytest"]</code> 缺 mcp/PyYAML；<code>mcp_server.py:15</code> 顶层 import yaml；<code>tests/test_mcp_server.py:14,16</code></td><td>只装 <code>.[dev]</code> 时测试收集失败或 MCP 用例被静默跳过；<code>142 passed</code> 依赖未声明的 <code>.[mcp]</code>。</td></tr>
+    <tr><td>wheel 不含交付资源</td><td><code>pyproject.toml:31-33</code> 只发现 <code>src/</code>；<code>MANIFEST.in:1-5</code> 只作用于 sdist，且遗漏 <code>tools/</code></td><td>非 editable 安装后拿不到 skills、打包脚本、docs 与 ODPS helper；文档需区分「源码检出」与「仅装 wheel」。</td></tr>
+    <tr><td>许可证与装饰字段</td><td>4 个 SKILL 声明 <code>license: MIT</code> 但仓库无 LICENSE；<code>gate-tools: true</code> 无任何实现</td><td>分发合规风险；<code>gate-tools</code> 易让宿主误以为已启用工具门禁。</td></tr>
+  </table>
+</div>
+
+<div class="item">
+  <h3><span class="tag t1">P1-F</span>文档治理：现行交付与历史设计混放</h3>
+  <ul>
+    <li><code>docs/CREDIT_AGENT_DEVELOPMENT_PLAN_V3.md:108</code>、<code>CREDIT_AGENT_PRODUCT_DESIGN_V3.md:182</code> 写「五项现有 Skill」，实际 4 个；<code>:3</code> 自认「F4 及后续尚未实施」，并引用 6 个不存在的文件（requirements/*.md、AGENT_ARCHITECTURE_V2_ROADMAP.md 等）。</li>
+    <li><code>docs/DATA.md:3, 81</code> 的 <code>credit-agent init</code> 与 <code>tests/test_e2e.py::test_report_identifies_the_injected_anomaly</code> 均不存在；<code>docs/DATA_INPUT.md</code> 的 <code>POST /topics</code>、<code>POST /datasets/upload</code>、<code>credit-agent run</code>、<code>code_sandbox</code> 均无实现；PRD 承诺的 <code>AgentProfile</code>、React 工作台、<code>cutoff_optimize</code>/<code>ModelingAnalyzer</code> 封装未落地。</li>
+    <li><code>config/env_schema.py</code> 是旧平台环境变量（LLM/Sandbox/API port 8890），MCP 启动走 argparse，<code>CREDIT_AGENT_*</code> 对已交付服务无效。</li>
+    <li>两份同日验证报告数值互斥：<code>model-strategy-validation-report.md:15,28,40</code> 为 62 笔 / AUC 0.9796 / KS 0.8509，<code>skill-mcp-validation-2026-11-11.md:40</code> 为 64 笔 / AUC 0.974513 / KS 0.822966（后者与本机复跑一致），旧报告未标 superseded 且无可复现脚本。</li>
+    <li>建议：把 7 份未实施/作废设计移入 <code>docs/archive/</code> 或统一加状态抬头；现行文档只保留 README、接入指南与最新复核报告；修正「五项 Skill」。</li>
+  </ul>
+</div>
+
+<h2>四、P2：工程质量与可维护性优化</h2>
+<div class="grid">
+  <div class="item">
+    <h3><span class="tag t2">P2-A</span>测试覆盖偏向领域层</h3>
+    <ul>
+      <li><code>tests/test_mcp_server.py:23-28</code> 的 <code>TOOLS</code> 只有 10 个、断言是子集；<code>list_credit_datasets</code> 零测试。</li>
+      <li>真实 stdio 仅调用 <code>inspect_and_bind_snapshot</code>、<code>check_label_maturity</code>、<code>resolve_metric_and_dimensions</code> 三个工具；其余 8 个绕过 <code>create_server</code> 的参数与 <code>_file</code> 校验。</li>
+      <li>JSON 口径分支、<code>_file</code> 四类负例、<code>create_server</code> 目录校验、<code>main()</code>、打包脚本与 <code>verify_public_datasets.py</code>、ODPS helper 均无自动化测试。</li>
+      <li>复核报告写「11 个工具可经 stdio 发现…真实 MCP 客户端的发现和调用测试」，证据链应补齐或改述。</li>
+    </ul>
+  </div>
+  <div class="item">
+    <h3><span class="tag t2">P2-B</span>实现但未接入交付面的孤儿能力</h3>
+    <ul>
+      <li><code>analytics/charts.py</code>（<code>render_charts</code> 零调用、docstring 仍是旧 API）、<code>analytics/funnel.py</code>（零 import）零测试。</li>
+      <li><code>data/ingest.py</code>、<code>source.py</code>、<code>sql_prepare.py</code>、<code>excel.py</code> 不经 MCP（MCP 直接 <code>read_csv/read_parquet</code>）；<code>modeling/scorecard_job.py</code>、<code>by_segment.py</code>、<code>report_spec.py</code>、<code>pipeline.py</code>、<code>export.py</code>（<code>ExportPolicy(export_model=False)</code>）只被 tests 与脚本引用。</li>
+      <li><code>score_grid</code> / <code>cutoff_optimize</code> / <code>limit_optimize</code> 只在公开数据脚本与测试中使用；<code>matplotlib</code>、<code>duckdb</code> 作为核心依赖仅服务这些模块。</li>
+      <li>建议：接入 MCP 并补测试，或显式归入 <code>research/</code> 标注非交付，同时把无用重依赖降为 optional。</li>
+    </ul>
+  </div>
+  <div class="item">
+    <h3><span class="tag t2">P2-C</span>资源与健壮性</h3>
+    <ul>
+      <li><code>mcp_server.py:68, 88</code> 无文件大小/行数上限，CSV 全量读入后 <code>ledger.py:69</code> 再写一份 parquet，峰值内存数倍；<code>report_markdown</code>/<code>citations</code> 无长度限制。</li>
+      <li><code>mcp_server.py:89</code> 的 <code>yaml.safe_load</code> 不防别名扩展炸弹；JSON 无深度限制。</li>
+      <li><code>admission.py:499-503</code> 日期解析未用 <code>format="mixed"</code>；<code>policy.py:66-88</code> 数值相等用字符串比较、多条件规则解析抛异常而非返回 <code>UNSUPPORTED_SCOPE</code>。</li>
+      <li>准入 Level A 判定（<code>admission.py:356-384</code>）不检查坏样本门槛，且因 <code>_LEAKAGE_TOKENS</code> 把 <code>bad/mob/dpd</code> 等正常表现字段标为疑似穿越，默认用法下几乎不可达；与 SKILL <code>:114</code> 的 Level A/B/C 定义不符。</li>
+    </ul>
+  </div>
+  <div class="item">
+    <h3><span class="tag t2">P2-D</span>打包器与 SKILL 规范细节</h3>
+    <ul>
+      <li><code>build_connector.py:36-38, 66-68</code>：先写完整个 output 才检查同名 ZIP，失败留下半成品且无法重试；<code>with_suffix(".zip")</code> 对含点输出名不产生同名 ZIP；绝对本机路径固化进可分享 ZIP。</li>
+      <li>4 个 SKILL 的 <code>description</code> 缺「何时使用 / 何时不使用」触发条件与反例；都要求先走 <code>credit-data-admission</code> 但无显式优先级触发规则。</li>
+      <li><code>list_credit_datasets</code> 返回 <code>list[str]</code>，与其余 10 个工具的 envelope 字典形状不一致，测试里靠 <code>if "result" in payload</code> 手工兼容。</li>
+      <li><code>timeout: 30000</code> 是连接超时（非执行超时），训练/网格搜索类工具的耗时预期未在文档说明。</li>
+    </ul>
+  </div>
+</div>
+
+<h2>五、文档已披露的未完成项（非新发现，但仍是交付缺口）</h2>
+<ul>
+  <li>宿主审批卡到 <code>record_human_decision</code> 的实际接线（<code>docs/workbuddy-skill-mcp-integration-guide.md:131-135</code>、<code>skill-mcp-validation-2026-11-11.md:17, 50</code>）。</li>
+  <li>真实带日期信贷样本的 OOT 策略 Lift 与成熟坏账率回测：两份公开数据无决策日/表现期，合成测试只能证明代码路径（<code>:43, 49</code>）。</li>
+  <li>LightGBM 依赖原生 OpenMP；缺失时只保留逻辑回归基线并返回 <code>degraded</code>（<code>:37, 51</code>）。</li>
+  <li>生产多租户需分别配置授权目录、账本目录、工具发布与权限；Connector 市场发布需复核 <code>source</code> 唯一性、图标文案与本地 stdio 执行权限。</li>
+</ul>
+
+<h2>六、建议修复顺序</h2>
+<table>
+  <tr><th style="width:14%">批次</th><th style="width:36%">内容</th><th>验收标准</th></tr>
+  <tr><td><strong>第一批</strong><br>业务红线 + 可运行性</td><td>P0-1 ~ P0-5：swap_in 归空、规则字段门禁、成熟度 T0 口径、异常统一 envelope、Connector 安装预检与依赖修正</td><td>新增负例测试全部通过；用当前 venv 按 README 安装后能从生成的 <code>mcp.json</code> 完成 stdio 握手并发现 11 个工具；故意传错参数返回 blocked envelope 而非 ToolError。</td></tr>
+  <tr><td><strong>第二批</strong><br>治理闭环 + 契约统一</td><td>P0-6 ~ P0-7、P1-A/B/C/D：审批适配器与 gate 消费、账本边界/权限/一次性确认单、码表统一、摘要契约、模式 C 与登记维度</td><td>端到端跑通「needs_human → 审批卡 → 继续」；所有 SKILL 声明的 block_code 均有产生点与测试；citation path 与可见摘要完全对齐。</td></tr>
+  <tr><td><strong>第三批</strong><br>发布就绪</td><td>P1-E/F、P2：版本/元数据合规、文档归档、MCP facade 与打包脚本测试、孤儿模块处置、资源限制</td><td>Connector 元数据通过官方规范自检；<code>docs/</code> 现行与归档分层；CI 在只装 <code>.[mcp,dev]</code> 的干净环境稳定跑出全绿。</td></tr>
+</table>
+
+<div class="foot">
+  <strong>复核方法：</strong>逐文件静态审查 + 三路并行交叉核对（工具层 / MCP 与打包层 / 测试与文档层）；
+  实测 <code>PYTHONPATH=src ../.venv/bin/python -m pytest -q tests</code> → 142 passed；
+  实测 <code>scripts/verify_public_datasets.py</code> 输出与 2026-11-11 复核报告一致；
+  实测虚拟环境导入与版本/元数据（<code>find_spec("credit_agent") = None</code>、<code>description_en = 105</code> 字符、<code>minWorkbuddyVersion</code> 缺失）；
+  Connector 字段规范对照 WorkBuddy 官方 Connector 文档（<code>cwd</code> 4.22.15、<code>name_zh/examples_*</code> 4.24.0、<code>description_en</code> 20–100 字符）。<br>
+  本报告只做只读审查与评估，未修改任何源代码或配置。
+</div>
+
+</div>
+</body>
+</html>
