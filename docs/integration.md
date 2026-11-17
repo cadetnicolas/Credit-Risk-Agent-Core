@@ -163,7 +163,49 @@ def commit_report(run_ids: list[str], report_markdown: str, citations: list[dict
 1. **`Ledger` 只能有一个实例、一个进程**。多进程并发写同一账本会破坏追加语义；需要并发就一租户一进程、各自独立账本根。
 2. **不要把 `record_human_decision` 暴露成工具**。它的存在是为了让宿主写审批卡，暴露给模型就等于把门禁交还给模型。
 
-工具函数的返回结构与 MCP 工具的返回完全一致（`status` / `block_code` / `summary` / `run_id`），SKILL 里的判断逻辑可以原样复用。
+工具函数的返回结构与 MCP 工具的返回完全一致，SKILL 里的判断逻辑可以原样复用：
+
+```json
+{
+  "ok": true,
+  "tool": "run_portfolio_monitoring",
+  "status": "ok",
+  "block_code": null,
+  "snapshot_id": "snap_…",
+  "run_id": "run_…",
+  "metric_id": "bad_rate",
+  "metric_version": "v1",
+  "summary": {},
+  "artifacts": [],
+  "allowed_conclusions": ["mix_shift"],
+  "human_gate": null,
+  "details": {}
+}
+```
+
+`status` 四态：`ok` / `degraded` / `needs_human` / `blocked`。**`blocked` 时 `summary` 只剩 `message`**，不携带任何未经核验的数字；诊断信息在 `details` 里。
+
+### 报告核验失败时怎么判因
+
+`verify_and_commit_report` 所有失败共用 `REPORT_UNTRACED` 一个码（宿主按码路由），具体原因在 `details.reason`：
+
+| `details.reason` | 含义 | 关键字段 |
+| --- | --- | --- |
+| `no_runs_referenced` | `run_ids` 为空，数字没有追溯对象 | — |
+| `empty_report` | 正文为空，没有可核验内容 | — |
+| `run_not_found` | 引用的 run 不在账本里 | `missing_run_ids`、`known_run_ids` |
+| `citation_malformed` | 引用缺 `path` / `rendered` | `citation_index` |
+| `path_not_found` | 路径在该 run 的 summary 里不存在 | `path`、`available_paths` |
+| `value_mismatch` | 引用值和产物不符 | `path`、`rendered`、`artifact_values`、`expected`（按同精度渲染的正确写法） |
+| `uncited_number` | 正文里的数字没有对应引用 | `fragment`、`context` |
+| `signoff_pending` | 写了上线/批准措辞但缺人工签收（码为 `SIGNOFF_REQUIRED`） | `gates` |
+
+`details.failures` 会一次列出最多 10 条（`details.failure_count` 是总数，可能大于 10）。`details.checked` 固定为四个键：`runs`（传入的运行数）、`runs_resolved`（账本能读到的）、`citations`（传入的引用条数）、`numbers`（正文里需要核验的数字个数）。引用可选用 `run_id` 绑定到某一次运行，避免同一 `path` 在多次运行间「任一命中即通过」。
+
+正文扫描会豁免日期、时长与阈值：`2026 年 3 月`、`9 月`、`12 个月`、`第 3 个月`、`MOB 3`、`≥10 万` 里的数字不要求引用；**其余数字必须来自某条引用，包括紧贴汉字的写法（`共400笔`、`坏账率3.45%`）**。`snap_abc123`、`v1.2.3` 这类标识符里的数字不参与扫描。
+
+正文全是豁免标签时（如只有「9 月复核」），返回 `ok` 但 `summary.verification_scope = "no_figures"`，表示这次核验没有实际数字，不要和「核过 N 个数字」混为一谈。
+
 
 ---
 

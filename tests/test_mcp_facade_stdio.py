@@ -92,12 +92,20 @@ def test_all_tools_are_callable_over_stdio(tmp_path):
                     "screen_features": {"prepare_run_id": "run_missing", "features": ["bad"]},
                     "train_and_evaluate_candidate": {"screen_run_id": "run_missing"},
                     "simulate_policy_rules": {"snapshot_id": snapshot, "mode": "unknown", "bad": "bad"},
-                    "verify_and_commit_report": {"run_ids": [], "report_markdown": "", "citations": []},
                 }
                 for name, arguments in rest.items():
                     raw = await session.call_tool(name, arguments)
                     assert not raw.isError, (name, raw.content)
                     results[name] = _payload(raw)
+
+                # 空 run_ids 不再被当作「无需核验」而放行；诊断要能跨协议传回来。
+                report = await session.call_tool("verify_and_commit_report", {
+                    "run_ids": ["run_missing"],
+                    "report_markdown": "",
+                    "citations": [],
+                })
+                assert not report.isError
+                results["verify_and_commit_report"] = _payload(report)
 
                 alias = await session.call_tool("resolve_metric_and_dimensions", {
                     "snapshot_id": snapshot, "metric_id": "bad_rate", "metric_version": "v1",
@@ -120,7 +128,8 @@ def test_all_tools_are_callable_over_stdio(tmp_path):
                 assert results["inspect_and_bind_snapshot"]["status"] in ("ok", "degraded")
                 assert results["check_label_maturity"]["block_code"] == "LABEL_IMMATURE", results["check_label_maturity"]
                 assert results["resolve_metric_and_dimensions"]["status"] != "blocked", results["resolve_metric_and_dimensions"]
-                assert results["verify_and_commit_report"]["status"] == "ok"
+                assert results["verify_and_commit_report"]["block_code"] == "REPORT_UNTRACED"
+                assert results["verify_and_commit_report"]["details"]["reason"] == "run_not_found"
                 business_codes = {
                     "SNAPSHOT_INVALID", "ADMISSION_REQUIRED", "LABEL_IMMATURE",
                     "FEATURE_REVIEW_REQUIRED", "VALIDATION_UNAVAILABLE", "BASELINE_UNAVAILABLE",

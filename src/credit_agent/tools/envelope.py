@@ -21,8 +21,18 @@ def envelope(
     artifacts: Optional[List[Dict[str, Any]]] = None,
     allowed_conclusions: Optional[List[str]] = None,
     human_gate: Optional[Dict[str, Any]] = None,
+    details: Optional[Dict[str, Any]] = None,
 ) -> Dict[str, Any]:
-    """Build the tool envelope. ``blocked`` carries no citable risk numbers."""
+    """Build the tool envelope. ``blocked`` carries no citable risk numbers.
+
+    ``details`` is the machine-readable half of a failure: which run, which
+    citation path, which value was expected. It survives ``blocked`` because a
+    block that only says "引用取不到数字" leaves the caller with nothing to fix.
+    Blocked ``summary`` still drops every other field — no unverified figure is
+    presented as a result. Diagnostics may quote a value from a run the caller
+    itself passed in; that is not new information, and without it a mismatch
+    cannot be corrected.
+    """
 
     if status not in ("ok", "degraded", "needs_human", "blocked"):
         raise ValueError("status 必须是 ok、degraded、needs_human 或 blocked")
@@ -44,4 +54,5 @@ def envelope(
         "artifacts": list(artifacts or []),
         "allowed_conclusions": list(allowed_conclusions or []),
         "human_gate": human_gate,
+        "details": dict(details or {}),
     }
