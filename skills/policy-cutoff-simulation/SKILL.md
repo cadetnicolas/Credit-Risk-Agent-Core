@@ -9,8 +9,8 @@ allowed-tools:
   - simulate_policy_rules
   - verify_and_commit_report
 metadata:
-  version: "1.5.0"
-  contract_version: "0.4"
+  version: "1.6.0"
+  contract_version: "0.5"
 ---
 
 # 信贷策略规则挖掘与阈值调优规程 (`policy-cutoff-simulation`)
@@ -23,7 +23,7 @@ metadata:
 
 ## 何时使用 / 何时不使用
 
-**四规程优先级**：任何监控、归因、策略或建模任务必须先经 `credit-data-admission` 完成数据准入体检；本规程只在已锁定成熟样本快照 `dataset_snapshot_id` 与目标坏账指标后启动。
+**五规程优先级**：任何监控、归因、策略或建模任务必须先经 `credit-data-admission` 完成数据准入体检；本规程只在已锁定成熟样本快照 `dataset_snapshot_id` 与目标坏账指标后启动。
 
 **何时使用（触发条件）**：需要基于存量风险发现或新评分卡输出，搜索单条件高风险拦截规则、模拟评分阈值（Cutoff）调整对规模与风险的权衡、构造置换集（Swap Set），或生成待人工审批的离线策略试验方案时使用。
 

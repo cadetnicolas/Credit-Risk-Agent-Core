@@ -255,7 +255,7 @@ python scripts/demo_end_to_end.py --config /path/to/your/mcp.json
 
 **4. 客户端里确认工具数量**
 
-让客户端列出工具，应该是 **14 个**。少一个通常是 `args` 写错或版本旧；多出来则说明连到了别的服务。
+让客户端列出工具，应该是 **16 个**。少一个通常是 `args` 写错或版本旧；多出来则说明连到了别的服务。
 
 **5. 跑一次真实链路**
 
@@ -273,7 +273,7 @@ python scripts/demo_end_to_end.py --config /path/to/your/mcp.json
 
 ## 六、常见问题
 
-**工具数不是 14**
+**工具数不是 16**
 
 - 客户端没有重新加载配置（多数需要重启或手动 Reload MCP）；
 - `args` 里 `--data-root` 等参数写错，进程启动即退出；
@@ -289,7 +289,14 @@ python scripts/demo_end_to_end.py --config /path/to/your/mcp.json
 
 **`needs_human` 之后卡住**
 
-宿主还没写审批卡。这是设计行为。用 `scripts/host_approval.py` 或自己的审批系统落账后，把 `review_id` 传回对应工具。
+先看信封里有没有 `review_id`，这两类 `needs_human` 的出路完全不同：
+
+- **有 `review_id`**（模型训练、策略模拟等）：宿主还没写审批卡。这是设计行为。用 `scripts/host_approval.py` 或自己的审批系统落账后，把 `review_id` 传回对应工具。
+- **没有 `review_id`，只有 `human_gate`**（`describe_population` / `compare_population_distribution`）：这不是审批，是**口径没填完**。`human_gate.kind` 告诉你缺哪一项：
+  - `field_semantics`：某个用到的列有缺失或零值，但 `spec.field_semantics` 没说它们算什么。补上 `{"列名": {"missing": ..., "zero": ...}}` 重跑。
+  - `binary_column_role`：某个 0/1 列没人声明它是特征还是表现结果。在**绑定快照**时用 `column_roles` 声明（`feature` / `observation_outcome`），再重跑描述；声明已落地的 run 不能改，两期都要重新描述才能比较。
+
+这两类都不落 run、不出数字，所以卡住的时候账本里没有半份结果，补完直接重跑即可。
 
 **训练返回 `degraded`**
 

@@ -1,6 +1,8 @@
 # SKILL、MCP 与公开数据功能复核
 
 > 状态：第 1–4 节是 v0.2（修复前）的复核记录，保留作为历史证据；v0.3 发布前修复与重新复核见第 5 节。第 1 节的「142 passed」与第 4 节的「宿主审批闭环仍需接线」描述的是修复前状态。
+>
+> **本文是 2026-11-11 当天的快照，其中的「四个 SKILL」「11 个工具」是当时的规模。**现行规模是六个 SKILL、16 个工具（v0.7，新增 `describe_population` / `compare_population_distribution` 与 `population-distribution-analysis` 规程）。要看现状请以 `README.md` 与 `scripts/verify_workbuddy_install.py` 为准，不要引本文的数量。
 
 日期：2026-11-11。范围：`credit_risk_agent/skills`、`credit_agent.tools`、独立 stdio MCP 服务、信用卡欺诈与 FICO HELOC 本地文件。以下是开发与功能验证结果，不是模型或策略的业务准出意见。
 

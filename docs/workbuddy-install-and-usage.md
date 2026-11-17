@@ -1,10 +1,10 @@
 # 在 WorkBuddy 中安装与使用信贷风控 SKILL + MCP
 
-本文档对应 `credit_risk_agent` v0.6.1，记录本机已完成的两项安装，以及日常使用、审批、排障和卸载方法。
+本文档对应 `credit_risk_agent` v0.7.0，记录本机已完成的两项安装，以及日常使用、审批、排障和卸载方法。
 
 > 与[接入指南](workbuddy-skill-mcp-integration-guide.md)的分工：接入指南面向**构建与打包 Connector**（客户端版本兼容、`mcp.json` 字段、ZIP 结构、发布自检）；本文面向**已装好之后的使用者**（SKILL 何时触发、数据目录怎么摆、审批怎么批、出问题怎么查）。
 
-- **4 个 SKILL** → `~/.workbuddy/skills/`（用户级，任意 WorkBuddy 会话可用）
+- **6 个 SKILL** → `~/.workbuddy/skills/`（用户级，任意 WorkBuddy 会话可用）
 - **1 个 MCP 服务** → `~/.workbuddy/mcp.json`，服务名 `credit-risk-analysis`（stdio）
 
 两者是配套关系：SKILL 规定「怎么想、什么时候停下来问人」，MCP 提供「真正算数的工具」。只装 SKILL 不装 MCP，Agent 会照规程描述流程但拿不到数据；只装 MCP 不装 SKILL，Agent 会调用工具但不懂成熟度、拒绝推断、审批这些业务红线。
@@ -19,14 +19,16 @@
 | SKILL | `~/.workbuddy/skills/portfolio-anomaly-attribution/` | `SKILL.md` + `references/attribution-rules-and-formulas.md` |
 | SKILL | `~/.workbuddy/skills/policy-cutoff-simulation/` | `SKILL.md` + `references/cutoff-and-swapset-methodology.md` |
 | SKILL | `~/.workbuddy/skills/scorecard-modeling-pipeline/` | `SKILL.md` + `references/scorecard-math-and-thresholds.md` |
-| MCP | `~/.workbuddy/mcp.json` | 服务 `credit-risk-analysis`，暴露 14 个工具（2 个取数 + 12 个分析） |
+| SKILL | `~/.workbuddy/skills/population-distribution-analysis/` | `SKILL.md` + `references/population-spec-and-tests.md` + `references/analysis-discipline.md` |
+| SKILL | `~/.workbuddy/skills/deliverable-html-report/` | `SKILL.md` + `references/layout-and-components.md` |
+| MCP | `~/.workbuddy/mcp.json` | 服务 `credit-risk-analysis`，暴露 16 个工具（2 个取数 + 14 个分析） |
 | 数据 | `~/credit-agent-workspace/datasets/` | 放授权数据集（csv / parquet / xlsx） |
 | 口径 | `~/credit-agent-workspace/registries/` | 放指标 / 维度登记表（yaml / json） |
 | 账本 | `~/credit-agent-workspace/ledger/` | 运行记录、快照、审批决定（权限 0700） |
 | 演示数据 | `~/credit-agent-workspace/datasets/demo_loan_panel.csv` | 合成样本，用于验证链路是否通；接真实数据前请移走 |
 | 数据库配置 | `~/.credit-agent/setup.html`（页面）或 `<仓库根>/.env`（模板 `.env.example`） | 取数凭证；只有 `download_sample` 需要，见 2.1。页面权限 `600` |
 | 配置页 | `credit-risk-config` / `scripts/config_setup.py` | 生成浏览器填写页，保存后工具自动读取 |
-| 自检脚本 | `scripts/verify_workbuddy_install.py` | 三层自检：SKILL 文件 / MCP 注册与三根 / 真实握手 |
+| 自检脚本 | `scripts/verify_workbuddy_install.py` | 四层自检：SKILL 文件 / MCP 注册与三根不相交 / 客户端是否需重启 / 真实握手与 16 工具 |
 | 连接自检 | `scripts/check_db.py` | 配置来自哪里、缺哪个变量或驱动、能否连通、可见表 |
 | 演示脚本 | `scripts/make_demo_workspace.py`、`scripts/demo_end_to_end.py` | 造合成数据、走完整链路并打印每步状态（`--direct` 免客户端配置直接起服务；`--config <mcp.json>` 复用客户端配置） |
 
@@ -326,7 +328,7 @@ cd /Users/zhongxing/Desktop/code_project/credit_data_analysis_and_auto_model_age
    ```
    [MCP-AuthDiag] stdio-connected {"pid":37634,"id":"custom-mcp:credit-risk-analysis","elapsedMs":2414}
    ```
-   同时 `~/.workbuddy/mcp-tool-list.json` 已缓存该服务的 14 个工具。
+   同时 `~/.workbuddy/mcp-tool-list.json` 已缓存该服务的 16 个工具。
 
 **还差最后一步：新建会话。** 工具清单属于会话上下文，MCP 连接成功之前建立的会话不会包含这些工具。判定方法——看日志里该会话启动参数中的 `mcp-config` 长度：
 
@@ -355,13 +357,13 @@ cd /Users/zhongxing/Desktop/code_project/credit_data_analysis_and_auto_model_age
 
 能打印出 `--data-root / --registry-root / --ledger-root` 三个参数即说明入口正常。
 
-更完整的四层自检（SKILL 文件 → MCP 注册与三根不相交 → 客户端是否需要重启 → 真实 stdio 握手与 11 工具）：
+更完整的四层自检（SKILL 文件 → MCP 注册与三根不相交 → 客户端是否需要重启 → 真实 stdio 握手与 16 工具）：
 
 ```bash
 PYTHONPATH=src ../.venv/bin/python scripts/verify_workbuddy_install.py
 ```
 
-预期全部为 `OK`（客户端若早于配置启动会出现一行 `WARN`，见 3.0），最后一行 `OK: stdio 握手成功，发现 14 个工具`。任一静态检查失败会以非 0 退出并打印 `FAIL: 具体原因`。
+预期全部为 `OK`（客户端若早于配置启动会出现一行 `WARN`，见 3.0），最后一行 `OK: stdio 握手成功，发现 16 个工具`。任一静态检查失败会以非 0 退出并打印 `FAIL: 具体原因`。
 
 如果只想做静态检查（不起服务）：
 
@@ -375,7 +377,7 @@ PYTHONPATH=src ../.venv/bin/python scripts/verify_workbuddy_install.py --skip-ha
 
 > 你现在能调用哪些信贷相关的工具？
 
-预期能看到 `inspect_and_bind_snapshot`、`check_label_maturity`、`run_portfolio_monitoring`、`simulate_policy_rules`、`prepare_modeling_sample` 等 14 个工具，且**没有** `record_human_decision`（它刻意不暴露给 Agent）。
+预期能看到 `inspect_and_bind_snapshot`、`check_label_maturity`、`run_portfolio_monitoring`、`simulate_policy_rules`、`prepare_modeling_sample` 等 16 个工具，且**没有** `record_human_decision`（它刻意不暴露给 Agent）。
 
 再问一句「你有哪些信贷风控的 skill」，应能列出上述 4 个。
 
@@ -405,7 +407,7 @@ PYTHONPATH=src ../.venv/bin/python scripts/demo_end_to_end.py \
 
 ```
 mode: config /Users/<you>/.workbuddy/mcp.json (server=credit-risk-analysis)
-handshake ok, 14 tools
+handshake ok, 16 tools
 [         ok] list_credit_datasets  count=1
 [         ok] inspect_and_bind_snapshot  snapshot=snap_c285ea044c1b
 [   degraded] check_label_maturity  mature_cohorts=5/6 rule=按放款批次月末 + 3 个完整账龄月 <= cutoff 判定（Vintage/MOB 行业惯例）
@@ -432,7 +434,7 @@ allowed conclusions: ['within_group_deterioration', 'unexplained_residual']
 
 ---
 
-## 4. 四个 SKILL 的触发时机
+## 4. 六个 SKILL 的触发时机
 
 | SKILL | 什么时候用 | 示例提问 |
 | --- | --- | --- |
@@ -440,6 +442,8 @@ allowed conclusions: ['within_group_deterioration', 'unexplained_residual']
 | `portfolio-anomaly-attribution` | 已有合法快照，要看存量异动、拆解是结构变化还是区内变化 | 「本月逾期率涨了 0.8 个点，是客群结构变了还是某渠道恶化？」 |
 | `policy-cutoff-simulation` | 调审批分数线、挖掘单条件规则、做置换集与盈亏平衡 | 「把 cutoff 从 70 放宽到 60，坏账和通过率会怎么变？」 |
 | `scorecard-modeling-pipeline` | 做评分卡：样本准备、特征筛选、训练验证、模型签收 | 「用这批数据训一版评分卡，先看 IV 和 PSI」 |
+| `population-distribution-analysis` | 没有标签或标签未成熟，但要看客群结构、字段分布、缺失口径 | 「10 月申请客群结构变了没有？某字段的分布是不是整体上移？」 |
+| `deliverable-html-report` | 结论已经算完，要把它交付成一份能看的 HTML 报告 | 「把这些结论做成一份可交付的报告」 |
 
 **不该用的时候**：只是要读一个 Excel、画个图、做纯 SQL 取数——这些不需要走信贷规程，直接用普通工具即可。SKILL 的价值在于守住成熟度、时点、拒绝推断这几条业务红线，不是给所有取数都套一层流程。
 
@@ -598,7 +602,7 @@ cd /Users/zhongxing/Desktop/code_project/credit_data_analysis_and_auto_model_age
 | 现象 | 原因 | 处理 |
 | --- | --- | --- |
 | **自定义连接器列表里根本没有 `credit-risk-analysis`** | 配置写入晚于客户端启动，MCP 清单只在启动时构建 | `Cmd+Q` 完全退出再打开；自检脚本会直接报这条 `WARN` |
-| 客户端看不到 14 个工具 | 新 MCP 未信任 | 连接器管理页右上角「自定义连接器」→ 点「信任」→ 新建会话 |
+| 客户端看不到 16 个工具 | 新 MCP 未信任 | 连接器管理页右上角「自定义连接器」→ 点「信任」→ 新建会话 |
 | 启动报 `No module named credit_agent` | 缺 `env.PYTHONPATH` | 检查 `mcp.json` 是否指向仓库 `src/` |
 | 报 `data-root 与 registry-root 必须是互不相交的独立目录` | 三个根重叠 | 改成三个平级独立目录 |
 | `list_credit_datasets` 列出了不该有的 parquet | 账本根放进了数据根 | 把 `--ledger-root` 移出数据目录 |
@@ -618,7 +622,7 @@ cd /Users/zhongxing/Desktop/code_project/credit_data_analysis_and_auto_model_age
 
 ```bash
 SRC=/Users/zhongxing/Desktop/code_project/credit_data_analysis_and_auto_model_agent/credit_risk_agent/skills
-for d in credit-data-admission portfolio-anomaly-attribution policy-cutoff-simulation scorecard-modeling-pipeline; do
+for d in credit-data-admission portfolio-anomaly-attribution policy-cutoff-simulation scorecard-modeling-pipeline population-distribution-analysis deliverable-html-report; do
   rm -rf ~/.workbuddy/skills/$d && mkdir -p ~/.workbuddy/skills/$d && cp -R "$SRC/$d/." ~/.workbuddy/skills/$d/
 done
 ```
@@ -627,7 +631,7 @@ done
 
 ### 卸载
 
-1. 删除 4 个 skill 目录：`rm -rf ~/.workbuddy/skills/credit-data-admission ~/.workbuddy/skills/portfolio-anomaly-attribution ~/.workbuddy/skills/policy-cutoff-simulation ~/.workbuddy/skills/scorecard-modeling-pipeline`
+1. 删除 6 个 skill 目录：`rm -rf ~/.workbuddy/skills/credit-data-admission ~/.workbuddy/skills/portfolio-anomaly-attribution ~/.workbuddy/skills/policy-cutoff-simulation ~/.workbuddy/skills/scorecard-modeling-pipeline ~/.workbuddy/skills/population-distribution-analysis ~/.workbuddy/skills/deliverable-html-report`
 2. 从 `~/.workbuddy/mcp.json` 的 `mcpServers` 中删掉 `credit-risk-analysis` 这一段（**只删这一段，不要删整个文件**）。
 3. 数据工作区 `~/credit-agent-workspace/` 建议保留，里面有账本审计记录。
 

@@ -55,10 +55,10 @@ flowchart TB
         A[对话 / 任务编排 / 审批卡 UI]
     end
     subgraph skills["SKILL 规程层（纯 Markdown）"]
-        S[5 个作业规程<br/>准入 / 监控归因 / 策略模拟 / 评分卡 / 报告版式]
+        S[6 个作业规程<br/>准入 / 客群分布 / 监控归因 / 策略模拟 / 评分卡 / 报告版式]
     end
     subgraph facade["出口层"]
-        M[stdio MCP Server<br/>14 个工具]
+        M[stdio MCP Server<br/>16 个工具]
         N[Python 原生调用<br/>credit_agent.tools]
     end
     subgraph core["计算内核 src/credit_agent"]
@@ -166,7 +166,7 @@ pytest -q
 
 ## MCP 工具清单
 
-14 个工具，按分析链路排列。所有工具返回统一 envelope。
+16 个工具，按分析链路排列。所有工具返回统一 envelope。
 
 | 阶段 | 工具 | 作用 |
 | --- | --- | --- |
@@ -176,6 +176,10 @@ pytest -q
 | 准入 | `inspect_and_bind_snapshot` | 绑定快照：主键唯一性、时间轴、权重字段、缺失与常量扫描，产出 `dataset_snapshot_id` |
 | 准入 | `check_label_maturity` | 表现期成熟度核算，`monthly_cohort`（建模）或 `latest_observed`（策略描述性测算） |
 | 准入 | `resolve_metric_and_dimensions` | 读取已签收口径（分子/分母/窗口/版本）与维度登记，划分列角色 |
+| 描述 | `describe_population` | 无标签客群分布：先锁定口径（总体/粒度/时点/分母/缺失语义/观察点），再输出全量与分箱构成；标签列一律拒收（0/1 标记列的均值就是坏账率） |
+| 描述 | `compare_population_distribution` | 同口径两期比较：分箱百分点变化、分位数差、四项检验各带适用范围与允许结论 |
+
+> 这两个工具的担保是具体的：**未声明的 0/1 列、只剩一侧判定词的列、以及词表内的成对措辞拿不到坏账率；词表外的措辞靠分析者在绑定时用 `column_roles` 声明角色**。字面缺失码（`N/A`、`-`、`未知`）按缺失计，不计入任何一档。
 | 监控 | `run_portfolio_monitoring` | 风险趋势、Vintage 曲线、逾期迁徙率 |
 | 监控 | `decompose_and_locate_anomaly` | Shift-Share 分解结构与组内效应，定位恶化客群 |
 | 建模 | `prepare_modeling_sample` | 划分好坏灰样本，优先时间外（OOT）验证 |
@@ -198,17 +202,18 @@ pytest -q
 
 ## SKILL 规程包
 
-`skills/` 下五个纯 Markdown 规程（v1.5.0，契约 v0.4），任何能加载 SKILL 的 Agent 平台都可直接使用：
+`skills/` 下六个纯 Markdown 规程（v1.6.0，契约 v0.5），任何能加载 SKILL 的 Agent 平台都可直接使用：
 
 | SKILL | 覆盖范围 |
 | --- | --- |
 | `credit-data-admission` | 数据准入体检、表现期成熟度、字段时点核查、可用范围裁定（Level A/B/C） |
+| `population-distribution-analysis` | 无标签客群分布：口径契约、全量分布优先、两期比较与检验口径、结论边界 |
 | `portfolio-anomaly-attribution` | 存量资产巡检、同账龄 Vintage、迁徙率、Shift-Share 归因、恶化客群定位 |
 | `policy-cutoff-simulation` | 规则挖掘、Cutoff 决策表模拟、置换集分析、边际坏账率与利润权衡 |
 | `scorecard-modeling-pipeline` | 评分卡与模型开发，优先 OOT 验证，无法 OOT 时由人选择较弱验证方式 |
 | `deliverable-html-report` | 可交付 HTML 报告的版式规范（只定格式，不定业务口径） |
 
-**四规程有明确优先级**：任何监控、归因、策略或建模任务都必须先经 `credit-data-admission` 拿到合法快照与成熟度结论，否则其余三个规程不得启动。
+**五个分析规程有明确优先级**：任何监控、归因、策略、建模或无标签分布分析任务都必须先经 `credit-data-admission` 拿到合法快照与成熟度结论，否则其余四个分析规程不得启动。`deliverable-html-report` 是交付规程，不参与这条优先级。
 
 ## 数据与安全边界
 
@@ -236,8 +241,8 @@ credit_risk_agent/
 │   ├── data/                   # 多后端取数（duckdb/odps/pg/holo/mysql）、落盘、manifest
 │   ├── config/                 # 凭证、路径、配置页
 │   ├── render/                 # HTML 报告渲染
-│   └── mcp_server.py           # stdio MCP 门面：14 个工具 + 启动期契约自检
-├── skills/                     # 5 个 SKILL 规程 + references 方法论
+│   └── mcp_server.py           # stdio MCP 门面：16 个工具 + 启动期契约自检
+├── skills/                     # 6 个 SKILL 规程 + references 方法论
 ├── workbuddy/                  # 参考适配器：连接器元数据、构建脚本、图标
 ├── scripts/
 │   ├── make_demo_workspace.py  # 合成演示工作区

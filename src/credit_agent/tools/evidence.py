@@ -40,7 +40,10 @@ _NUMBER = re.compile(
     # characters, so "共400笔" would never be scanned at all — a Chinese report
     # could then carry any uncited figure just by gluing it to text.
     r"(?<![0-9A-Za-z_.])("
-    r"-?\d{1,3}(?:,\d{3})+(?:\.\d+)?[ \t]*[%％]"
+    # 科学计数法要整体匹配，否则 "8.39e-16" 只会扫到 "8.39"，引用写成
+    # "8.39e-16" 反而被判成未引用。
+    r"-?\d+(?:\.\d+)?[eE][+-]?\d+"
+    r"|-?\d{1,3}(?:,\d{3})+(?:\.\d+)?[ \t]*[%％]"
     r"|-?\d+\.\d+[ \t]*[%％]"
     r"|-?\d+[ \t]*[%％]"
     r"|-?\d{1,3}(?:,\d{3})+(?:\.\d+)?\s*bp(?![A-Za-z])"
@@ -59,6 +62,9 @@ _ISO_DATE = re.compile(
     r"|(?<!\d)\d{4}[-/]\d{2}(?!\d)"
 )
 
+# 科学计数法的数字（p 值常见）也要能引用；是否成立由 _matches 的相对容差判定。
+_SCIENTIFIC = re.compile(r"[+-]?\d+(?:\.\d+)?[eE][+-]?\d+")
+
 # Labels, not measurements. A Chinese credit report names the month and the
 # threshold in every paragraph ("9 月", "≥10 万"), and demanding a citation for
 # those digits makes a *correct* report impossible to commit. These spans are
@@ -72,6 +78,11 @@ _IGNORED_FRAGMENT = re.compile(
     r"|\d+(?:\.\d+)?\s*个?\s*(?:月|期|季度|批)"
     r"|[Mm][Oo][Bb]\s*[-=]?\s*\d+"
     r"|[≥≤<>＞＜]\s*-?\d+(?:\.\d+)?"
+    # 口径指纹是 16 位十六进制，约十分之七以数字开头。它是标识符不是度量值，
+    # 但数字扫描会把它当整数要求引用，于是一份正确引用了口径的报告反而提交
+    # 不了。带字母的十六进制 token 一律不算数字；全数字的那种无法与 16 位整数
+    # 区分，因此指纹本身带 fp_ 前缀，从源头上避开。大小写都算。
+    r"|(?<![0-9A-Za-z_])(?=[0-9a-fA-F]{0,15}[a-fA-F])[0-9a-fA-F]{16}(?![0-9A-Za-z_])"
 )
 
 
@@ -166,6 +177,15 @@ def _expected_renderings(values: Sequence[Any], texts: Sequence[Any], rendered: 
         _, decimals, scale = _parse_rendered(rendered)
     except (ValueError, ArithmeticError):
         decimals, scale = 4, Decimal(1)
+    if decimals is None:
+        # 科学计数法：没有「小数位」可对齐，建议直接给出同量级的写法。
+        for value in values:
+            try:
+                candidates.append(f"{float(Decimal(str(value))):.3g}")
+            except (ArithmeticError, ValueError, TypeError):
+                continue
+        candidates.extend(str(text) for text in texts)
+        return candidates[:4]
     if stripped.endswith(("%", "％")):
         suffix = "%"
     elif stripped.endswith("bp"):
@@ -276,6 +296,13 @@ def _parse_rendered(rendered: str):
     elif text.endswith("bp"):
         scale = Decimal(10000)
         text = text[:-2]
+    if _SCIENTIFIC.fullmatch(text):
+        # p 值常写成 8.39e-16。小数位精度规则对它没有意义（量级跨十几个
+        # 数量级），改用有效数字级别的相对容差，见 _matches。
+        try:
+            return Decimal(text) / scale, None, scale
+        except ArithmeticError:
+            raise ValueError(rendered)
     if not re.fullmatch(r"[+-]?\d+(?:\.\d+)?", text):
         raise ValueError(rendered)
     decimals = len(text.partition(".")[2])
@@ -283,11 +310,36 @@ def _parse_rendered(rendered: str):
     return shown / scale, decimals, scale
 
 
+def _scientific_match(artifact: Any, rendered: str, scale: Decimal) -> bool:
+    """Compare a scientific-notation claim at its own precision.
+
+    ``8.39e-16`` claims three significant digits, so the artifact is rounded to
+    that quantum before comparison — the same rule as the plain-decimal path,
+    applied in the exponent domain instead of the fractional one.
+    """
+
+    text = "".join(str(rendered).split()).replace("％", "%")
+    if text.endswith("%"):
+        text = text[:-1]
+    elif text.endswith("bp"):
+        text = text[:-2]
+    mantissa, _, exponent = text.replace("E", "e").partition("e")
+    decimals = len(mantissa.partition(".")[2])
+    try:
+        quantum = Decimal(1).scaleb(int(exponent) - decimals)
+        art = Decimal(str(artifact)) * scale
+        return art.quantize(quantum, rounding=ROUND_HALF_UP) == Decimal(text)
+    except (ArithmeticError, ValueError, TypeError):
+        return False
+
+
 def _matches(artifact: Any, rendered: str) -> bool:
     try:
         target, decimals, scale = _parse_rendered(rendered)
     except (ValueError, ArithmeticError):
         return False
+    if decimals is None:
+        return _scientific_match(artifact, rendered, scale)
     try:
         art = Decimal(str(artifact))
         display = (art * scale).quantize(Decimal(1).scaleb(-decimals), rounding=ROUND_HALF_UP)
@@ -316,7 +368,8 @@ def _brief(value: Any, limit: int = 120) -> str:
 def _norm_number(text: Any) -> str:
     """Normalise a written number: no whitespace, no thousands separators, one percent sign."""
 
-    return _compact(text).replace(",", "").replace("％", "%").replace("\u00a0", "")
+    compact = _compact(text).replace(",", "").replace("％", "%").replace("\u00a0", "")
+    return compact.lower()
 
 
 def _scan_matches(report_markdown: str) -> List[re.Match]:

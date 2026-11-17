@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "credit-risk-agent-core"
-version = "0.6.1"
+version = "0.7.0"
 description = "Platform-independent credit analytics, modeling, Skills and MCP tools."
 readme = "README.md"
 requires-python = ">=3.11"
@@ -68,6 +68,8 @@ credit_agent = ["config/*.html"]
 "share/credit-risk-agent/skills/scorecard-modeling-pipeline/references" = ["skills/scorecard-modeling-pipeline/references/*.md"]
 "share/credit-risk-agent/skills/deliverable-html-report" = ["skills/deliverable-html-report/SKILL.md"]
 "share/credit-risk-agent/skills/deliverable-html-report/references" = ["skills/deliverable-html-report/references/*.md"]
+"share/credit-risk-agent/skills/population-distribution-analysis" = ["skills/population-distribution-analysis/SKILL.md"]
+"share/credit-risk-agent/skills/population-distribution-analysis/references" = ["skills/population-distribution-analysis/references/*.md"]
 "share/credit-risk-agent/workbuddy" = ["workbuddy/*.md", "workbuddy/*.json", "workbuddy/*.svg", "workbuddy/*.py"]
 
 [tool.pytest.ini_options]

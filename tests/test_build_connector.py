@@ -141,7 +141,7 @@ def test_generated_meta_self_check_and_version(mod, roots, out_base):
     _build(mod, roots, output)
 
     meta = json.loads((output / "connector-meta.json").read_text(encoding="utf-8"))
-    assert meta["version"] == _pyproject_version() == "0.6.1"
+    assert meta["version"] == _pyproject_version() == "0.7.0"
     assert meta["minWorkbuddyVersion"] == "4.24.0"
     assert 20 <= len(meta["description_en"]) <= 100
     assert re.fullmatch(r"[a-z0-9]+(?:-[a-z0-9]+)*", meta["source"])

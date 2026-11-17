@@ -11,8 +11,8 @@ allowed-tools:
   - decompose_and_locate_anomaly
   - simulate_policy_rules
 metadata:
-  version: "1.5.0"
-  contract_version: "0.4"
+  version: "1.6.0"
+  contract_version: "0.5"
 ---
 
 # 可交付 HTML 报告的版式规范 (`deliverable-html-report`)

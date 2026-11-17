@@ -38,8 +38,8 @@ def _skill_frontmatter(path: Path) -> dict:
 
 def test_status_and_code_enums_are_complete():
     assert set(STATUSES) == {"ok", "degraded", "needs_human", "blocked"}
-    # 12 analysis tools + 2 acquisition tools (download_sample, import_sample_file)
-    assert len(MCP_TOOL_NAMES) == 14
+    # 14 analysis tools + 2 acquisition tools (download_sample, import_sample_file)
+    assert len(MCP_TOOL_NAMES) == 16
     assert {"download_sample", "import_sample_file"} <= set(MCP_TOOL_NAMES)
     assert "record_human_decision" not in MCP_TOOL_NAMES
     assert GATES == {
@@ -55,6 +55,8 @@ def test_status_and_code_enums_are_complete():
         # acquisition (v0.4)
         "ROW_CAP_EXCEEDED", "MULTI_STATEMENT_SQL", "SAMPLE_FILE_UNREADABLE",
         "BACKEND_UNAVAILABLE",
+        # description (v0.7)
+        "POPULATION_MISMATCH", "SPEC_MISMATCH",
     } <= set(BLOCK_CODES)
 
 
@@ -69,14 +71,14 @@ def test_skill_declarations_match_runtime(roots):
     server = create_server(data_root=roots[0], registry_root=roots[1], ledger_root=roots[2])
     served = {tool.name for tool in server._tool_manager.list_tools()}
     skill_files = sorted(SKILLS.glob("*/SKILL.md"))
-    assert len(skill_files) == 5
+    assert len(skill_files) == 6
     for path in skill_files:
         fm = _skill_frontmatter(path)
         declared = set(re.findall(r"^  - ([a-z_]+)$", fm["raw"], flags=re.MULTILINE))
         assert declared and declared <= served, path
         assert "record_human_decision" not in declared
-        assert 'version: "1.5.0"' in fm["raw"], path
-        assert 'contract_version: "0.4"' in fm["raw"], path
+        assert 'version: "1.6.0"' in fm["raw"], path
+        assert 'contract_version: "0.5"' in fm["raw"], path
         assert "gate-tools" not in fm["raw"], path
         assert "何时使用" in fm["body"] and "何时不使用" in fm["body"], path
         for target in re.findall(r"\]\((references/[^)]+)\)", fm["body"]):
@@ -185,10 +187,35 @@ def test_business_red_lines_are_enforced_in_source():
     assert "min_hits" in rules
 
 
+def test_install_self_check_tracks_the_real_catalogue():
+    """安装自检脚本写死的工具数/skill 清单必须跟着发布走。
+
+    这个脚本是用户「装完了吗」的判据：它的数量落后一个版本，用户看到的是
+    「工具数应为 14，实际 16」——读起来像装坏了，而不是像脚本过时。
+    """
+
+    import importlib.util
+
+    spec = importlib.util.spec_from_file_location(
+        "verify_workbuddy_install", ROOT / "scripts/verify_workbuddy_install.py"
+    )
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+
+    assert module.EXPECTED_TOOL_COUNT == len(MCP_TOOL_NAMES)
+    assert set(module.REQUIRED_TOOLS) == set(MCP_TOOL_NAMES)
+    assert not set(module.FORBIDDEN_TOOLS) & set(MCP_TOOL_NAMES)
+    # skill 清单与磁盘一致，且每个 reference 文件真实存在。
+    assert set(module.SKILLS) == {path.parent.name for path in SKILLS.glob("*/SKILL.md")}
+    for name, reference in module.SKILLS.items():
+        assert (SKILLS / name / "SKILL.md").is_file(), name
+        assert (SKILLS / name / reference).is_file(), (name, reference)
+
+
 def test_connector_metadata_and_version_are_release_ready():
     config = tomllib.loads((ROOT / "pyproject.toml").read_text(encoding="utf-8"))
     version = config["project"]["version"]
-    assert version == __version__ == "0.6.1"
+    assert version == __version__ == "0.7.0"
     meta = json.loads((ROOT / "workbuddy/connector-meta.json").read_text(encoding="utf-8"))
     assert meta["version"] == version
     assert meta.get("minWorkbuddyVersion") == "4.24.0"

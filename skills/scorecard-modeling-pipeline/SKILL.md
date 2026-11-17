@@ -11,8 +11,8 @@ allowed-tools:
   - train_and_evaluate_candidate
   - verify_and_commit_report
 metadata:
-  version: "1.5.0"
-  contract_version: "0.4"
+  version: "1.6.0"
+  contract_version: "0.5"
 ---
 
 # 标准评分卡与风控建模验证规程 (`scorecard-modeling-pipeline`)
@@ -25,7 +25,7 @@ metadata:
 
 ## 何时使用 / 何时不使用
 
-**四规程优先级**：任何监控、归因、策略或建模任务必须先经 `credit-data-admission` 完成数据准入体检；本规程只在已取得成熟标签样本后启动，无成熟标签时不走任何回退方式。
+**五规程优先级**：任何监控、归因、策略或建模任务必须先经 `credit-data-admission` 完成数据准入体检；本规程只在已取得成熟标签样本后启动，无成熟标签时不走任何回退方式。
 
 **何时使用（触发条件）**：需要开发申请评分卡（A 卡）、行为评分卡（B 卡）、催收评分卡（C 卡）或对比机器学习候选模型，执行成熟标签的时间外验证、特征防泄漏筛选、人工特征确认与模型卡交付时使用。
 

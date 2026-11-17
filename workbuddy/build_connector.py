@@ -20,6 +20,7 @@ SKILLS = (
     "policy-cutoff-simulation",
     "scorecard-modeling-pipeline",
     "deliverable-html-report",
+    "population-distribution-analysis",
 )
 
 

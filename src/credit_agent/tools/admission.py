@@ -18,13 +18,14 @@ from credit_agent.tools.envelope import envelope
 from credit_agent.tools.ledger import Ledger, new_id
 
 _GRAINS = ("loan", "application", "loan_month")
-_EXPLICIT_ROLES = ("decision_time", "observation_outcome", "suspect_leakage")
+_EXPLICIT_ROLES = ("decision_time", "observation_outcome", "suspect_leakage", "feature")
 _ROLE_KEYS = (
     "id",
     "decision_time",
     "observation_time",
     "observation_outcome",
     "suspect_leakage",
+    "feature",
     "unclassified",
 )
 # 贷后/观察时点快照类字段仍属疑似穿越；正常表现结果字段不算嫌疑。
@@ -126,6 +127,19 @@ def inspect_and_bind_snapshot(
     decision_days = _day_series(frame[decision_time_column])
     if not bool(decision_days.notna().any()):
         return _blocked("inspect_and_bind_snapshot", "SNAPSHOT_INVALID", "决策时点无法解析，不能确定截止日")
+    # 决策时点必须是日期。pandas 会把数值当成纳秒时间戳，于是 0/1 标记列
+    # 也会「解析成功」并落到 1970-01-01：一个 0/1 的标签列因此可以冒充决策
+    # 时点，绑定通过，之后按 0/1 分期，两期分母正好是坏客户数与好客户数。
+    if looks_like_codes(frame[decision_time_column]) or parsed_into_epoch(
+        frame[decision_time_column], decision_days
+    ):
+        return _blocked(
+            "inspect_and_bind_snapshot",
+            "SNAPSHOT_INVALID",
+            f"决策时点列 {decision_time_column} 不是日期："
+            "取值为 0/1、小编码或纯数值时会被当成 1970 年的时间戳；"
+            "混有数值与日期的列同样如此。请先转成 YYYY-MM-DD 再绑定",
+        )
     as_of = None
     if as_of_date is not None:
         as_of = _parse_day(as_of_date)
@@ -201,6 +215,9 @@ def inspect_and_bind_snapshot(
     meta = {
         "grain": grain,
         "column_roles": roles,
+        # column_roles 里每一列都有角色（含推断出来的）。谁是被分析者
+        # 主动声明过的，要单独留下，否则事后无法区分「声明」与「推断」。
+        "explicit_roles": dict(explicit_roles),
         "cutoff": summary["cutoff"],
         "cutoff_source": summary["cutoff_source"],
         "as_of_date": summary["as_of_date"],
@@ -638,7 +655,9 @@ def _explicit_roles(column_roles: Optional[Mapping[str, str]]) -> Dict[str, str]
         if not isinstance(column, str) or column == "":
             raise ValueError("column_roles 的列名必须是字符串")
         if role not in _EXPLICIT_ROLES:
-            raise ValueError("column_roles 只接受 decision_time、observation_outcome 或 suspect_leakage")
+            raise ValueError(
+                "column_roles 只接受 decision_time、observation_outcome、suspect_leakage 或 feature"
+            )
         explicit[column] = role
     return explicit
 
@@ -708,6 +727,42 @@ def _day_series(series: pd.Series) -> pd.Series:
     if isinstance(parsed.dtype, pd.DatetimeTZDtype):
         parsed = parsed.dt.tz_convert(None)
     return parsed.dt.normalize()
+
+
+def looks_like_codes(series: pd.Series) -> bool:
+    """Small integer codes (0/1, 1/2, 0/1/2): a marker or an encoding, never a date.
+
+    Judged on the values, not on the dtype: an ``object`` column holding 0/1 is
+    still 0/1, and pandas would otherwise read it as an epoch timestamp and let
+    a bad flag become the decision time. ``1/2`` is included on purpose — it is
+    the most common good/bad encoding after 0/1.
+    """
+
+    if pd.api.types.is_bool_dtype(series):
+        return True
+    coerced = pd.to_numeric(series, errors="coerce")
+    values = set(float(item) for item in pd.unique(coerced.dropna()))
+    if not values:
+        return False
+    if any(not item.is_integer() for item in values):
+        return False
+    return len(values) <= 3 and max(values) <= 12
+
+
+def parsed_into_epoch(series: pd.Series, days: pd.Series) -> bool:
+    """True when some values parse as dates and others land in 1970.
+
+    pandas reads bare numbers as nanosecond timestamps, so ``0/1`` and
+    ``20240901`` both become 1970-01-01. A column that mixes 1970 with real
+    dates is not a date column at all — and one text date is enough to hide the
+    numeric rows, so the check looks at the whole year range rather than at its
+    maximum.
+    """
+
+    years = days.dropna().dt.year
+    if years.empty:
+        return False
+    return bool((years < 1980).any())
 
 
 def _parse_day(value: Any) -> Optional[pd.Timestamp]:

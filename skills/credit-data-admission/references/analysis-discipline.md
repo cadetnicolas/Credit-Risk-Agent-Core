@@ -1,4 +1,4 @@
-# 分析纪律（四规程共用）
+# 分析纪律（五个分析规程共用）
 
 > 本文件被 `credit-data-admission` / `portfolio-anomaly-attribution` /
 > `policy-cutoff-simulation` / `scorecard-modeling-pipeline` 共同引用。

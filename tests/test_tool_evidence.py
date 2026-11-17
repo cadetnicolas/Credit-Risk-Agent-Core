@@ -314,6 +314,64 @@ def test_month_labels_and_thresholds_need_no_citation(tmp_path):
     assert out["status"] == "ok", out["details"]
 
 
+def test_hex_identifiers_need_no_citation(tmp_path):
+    """十六进制 id 是标识符：小写、大写、带字母的 16 位 token 都不算数字。"""
+
+    ledger = Ledger(tmp_path)
+    ledger.save_run("run_a", "demo", "snap", {"holdout_auc": 0.8123, "fingerprint": "fp_4b1c9e2a7d3f5061"})
+    out = verify_and_commit_report(
+        ledger=ledger,
+        run_ids=["run_a"],
+        report_markdown=(
+            "口径 fp_4b1c9e2a7d3f5061；产物哈希 a1b2c3d4e5f60718；"
+            "另一份 12345678ABCDEF01；AUC 0.8123。"
+        ),
+        citations=[
+            {"path": "fingerprint", "rendered": "fp_4b1c9e2a7d3f5061"},
+            {"path": "holdout_auc", "rendered": "0.8123"},
+        ],
+    )
+    assert out["status"] == "ok", out["details"]
+
+
+def test_p_values_can_be_cited_in_scientific_notation(tmp_path):
+    """p 值写成 8.39e-16 时不能被拆成 8.39 与 16 两个数字。"""
+
+    ledger = Ledger(tmp_path)
+    ledger.save_run("run_a", "demo", "snap", {"tests": [{"p_value": 8.3912e-16}]})
+    cited = [{"path": "tests.0.p_value", "rendered": "8.39e-16"}]
+    for body in ("KS 检验 p=8.39e-16。", "KS 检验 p=8.39E-16。"):
+        out = verify_and_commit_report(
+            ledger=ledger, run_ids=["run_a"], report_markdown=body, citations=cited
+        )
+        assert out["status"] == "ok", (body, out["details"])
+    # 写成一位有效数字同样成立：8.3912e-16 四舍五入到 8.4e-16。
+    one_digit = verify_and_commit_report(
+        ledger=ledger, run_ids=["run_a"], report_markdown="KS 检验 p=8.4e-16。",
+        citations=[{"path": "tests.0.p_value", "rendered": "8.4e-16"}],
+    )
+    assert one_digit["status"] == "ok", one_digit["details"]
+    # 但正文写 8.4e-16、引用写 8.39e-16 不算覆盖：两者不是同一个写法。
+    mismatched = verify_and_commit_report(
+        ledger=ledger, run_ids=["run_a"], report_markdown="KS 检验 p=8.4e-16。", citations=cited
+    )
+    assert mismatched["details"]["reason"] == "uncited_number"
+    # 量级或有效数字对不上仍然要拒。
+    for body, rendered in (("KS 检验 p=8.39e-15。", "8.39e-15"), ("KS 检验 p=1e-3。", "1e-3")):
+        bad = verify_and_commit_report(
+            ledger=ledger, run_ids=["run_a"], report_markdown=body,
+            citations=[{"path": "tests.0.p_value", "rendered": rendered}],
+        )
+        assert bad["status"] == "blocked"
+        assert bad["details"]["reason"] == "value_mismatch"
+    # 四位小数写法仍然有效。
+    plain = verify_and_commit_report(
+        ledger=ledger, run_ids=["run_a"], report_markdown="KS 检验 p=0.0000。",
+        citations=[{"path": "tests.0.p_value", "rendered": "0.0000"}],
+    )
+    assert plain["status"] == "ok", plain["details"]
+
+
 def test_citation_can_be_scoped_to_one_run(tmp_path):
     ledger = Ledger(tmp_path)
     ledger.save_run("run_a", "demo", "snap", {"holdout_auc": 0.8})

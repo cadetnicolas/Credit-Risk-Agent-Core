@@ -1,6 +1,6 @@
-# WorkBuddy 信贷分析连接器（v0.6.1）
+# WorkBuddy 信贷分析连接器（v0.7.0）
 
-这是 `credit-risk-agent-core` 的 WorkBuddy 发布/本地导入包构建目录。Python 业务代码与 SKILL 源文件以项目根目录为唯一来源；生成脚本把它们组织成 WorkBuddy Connector 目录或 ZIP，不维护第二份代码副本。当前版本 **0.6.1**（`pyproject.toml`、`src/credit_agent/__init__.py`、`workbuddy/connector-meta.json` 三处一致）。
+这是 `credit-risk-agent-core` 的 WorkBuddy 发布/本地导入包构建目录。Python 业务代码与 SKILL 源文件以项目根目录为唯一来源；生成脚本把它们组织成 WorkBuddy Connector 目录或 ZIP，不维护第二份代码副本。当前版本 **0.7.0**（`pyproject.toml`、`src/credit_agent/__init__.py`、`workbuddy/connector-meta.json` 三处一致）。
 
 ## 前置条件
 
@@ -20,7 +20,7 @@ python workbuddy/build_connector.py \
   --output /absolute/path/to/credit-risk-connector
 ```
 
-脚本会：用 `tomllib` 从 `pyproject.toml` 读取版本并注入生成的 `connector-meta.json`（单一来源，避免漂移）；生成含 `cwd` / `env.PYTHONPATH` / 三个 root 参数的 `mcp.json`；复制图标、README 和五个 SKILL（含 references）；**生成前**自检 `connector-meta.json`（版本、`minWorkbuddyVersion`、`description_en` 长度、`source` kebab-case、examples 数量）、校验目标解释器依赖与 `src` 目录；**生成后**断言 ZIP 条目清单；最后打印一行版本清单便于发布核对。
+脚本会：用 `tomllib` 从 `pyproject.toml` 读取版本并注入生成的 `connector-meta.json`（单一来源，避免漂移）；生成含 `cwd` / `env.PYTHONPATH` / 三个 root 参数的 `mcp.json`；复制图标、README 和六个 SKILL（含 references）；**生成前**自检 `connector-meta.json`（版本、`minWorkbuddyVersion`、`description_en` 长度、`source` kebab-case、examples 数量）、校验目标解释器依赖与 `src` 目录；**生成后**断言 ZIP 条目清单；最后打印一行版本清单便于发布核对。
 
 产物是目录 `<output>/` 与同名 ZIP `<output>.zip`（若输出名含点，ZIP 也用完整输出名，不会被 `with_suffix` 截断）。`output` 与 ZIP 在写入前会同时检查是否已存在，任一已存在即报错且不留半成品；构建先在临时目录完成再原子改名，异常时清理中间产物。生成包只包含连接配置与说明，不含任何数据或账本。`--output` 必须位于项目目录之外。
 
@@ -44,10 +44,10 @@ python workbuddy/build_connector.py \
 
 ## 发布前自检
 
-- 版本三处一致且为 0.6.1；构建输出的一行版本清单（pyproject / `__init__` / 模板 / 生成物）无漂移。
+- 版本三处一致且为 0.7.0；构建输出的一行版本清单（pyproject / `__init__` / 模板 / 生成物）无漂移。
 - `connector-meta.json`：`description_en` 20–100 字符、`examples_zh`/`examples_en` 各 2–5 条、`source` 为 kebab-case、含 `minWorkbuddyVersion=4.24.0`。
 - 预检通过：目标解释器 + `src` 下 `import credit_agent, mcp, yaml` 成功。
-- ZIP 内含 `connector-meta.json` / `mcp.json` / `icon.svg` / `README.md` / 5 个 `skills/<name>/SKILL.md` 及其 references。
+- ZIP 内含 `connector-meta.json` / `mcp.json` / `icon.svg` / `README.md` / 6 个 `skills/<name>/SKILL.md` 及其 references。
 - `mcp.json` 的 command/cwd/env/三个 root 指向本机真实路径，且构建与运行同机。
 - 提交 Connector 市场前确认 `source` 全局唯一性、图标与文案，并审查本地 stdio 执行权限。
 

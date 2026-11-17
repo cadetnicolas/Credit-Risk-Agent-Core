@@ -42,6 +42,12 @@ BLOCK_CODES = frozenset({
     # WHERE silently redefines the denominator, and a note on top of wrong data
     # does not make the data right.
     "SQL_SCOPE_NOT_AUTHORIZED",
+    # --- description (v0.7) ---
+    # Two ways a label-free analysis can look right and mean the wrong thing:
+    # the stated population disagrees with the denominator it is computed on,
+    # or the two periods were described under different calibers.
+    "POPULATION_MISMATCH",
+    "SPEC_MISMATCH",
 })
 
 GATES = frozenset({
@@ -62,6 +68,8 @@ MCP_TOOL_NAMES = (
     "inspect_and_bind_snapshot",
     "check_label_maturity",
     "resolve_metric_and_dimensions",
+    "describe_population",
+    "compare_population_distribution",
     "run_portfolio_monitoring",
     "decompose_and_locate_anomaly",
     "prepare_modeling_sample",

@@ -15,7 +15,7 @@
 | --- | --- |
 | [architecture.md](architecture.md) | 分层与依赖方向、数据流、账本结构、门禁生效位置、扩展点、设计取舍 |
 | [sample-acquisition-design.md](sample-acquisition-design.md) | 取数链路：原样执行 SQL 的授权契约、单语句/只读/行数上限、manifest 与落盘 |
-| [../skills/](../skills/) | 五个 SKILL 的业务方法论与 references（准入、监控归因、策略模拟、评分卡、报告版式） |
+| [../skills/](../skills/) | 六个 SKILL 的业务方法论与 references（准入、客群分布、监控归因、策略模拟、评分卡、报告版式） |
 
 ## 平台专用
 

@@ -9,8 +9,8 @@ allowed-tools:
   - decompose_and_locate_anomaly
   - verify_and_commit_report
 metadata:
-  version: "1.5.0"
-  contract_version: "0.4"
+  version: "1.6.0"
+  contract_version: "0.5"
 ---
 
 # 存量资产监控与风险异动归因规程 (`portfolio-anomaly-attribution`)
@@ -23,7 +23,7 @@ metadata:
 
 ## 何时使用 / 何时不使用
 
-**四规程优先级**：任何存量监控、异常归因、策略或建模任务必须先经 `credit-data-admission` 完成数据准入体检；本规程只在已取得合法 `dataset_snapshot_id` 与 `metric_version` 后启动。
+**五规程优先级**：任何存量监控、异常归因、策略或建模任务必须先经 `credit-data-admission` 完成数据准入体检；本规程只在已取得合法 `dataset_snapshot_id` 与 `metric_version` 后启动。
 
 **何时使用（触发条件）**：需要逐期盯住已放款存量组合的逾期与迁徙异动、做同账龄 Vintage 对比、Shift-Share 结构与组内风险效应分解，或定位满足统计显著性的恶化切片并输出可复核调查报告时使用。基期 `base_periods` 与对比期 `comp_periods` 必须明确传入且非空。
 

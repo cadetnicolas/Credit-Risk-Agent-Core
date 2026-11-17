@@ -12,6 +12,7 @@ from .admission import (
     resolve_metric_and_dimensions,
 )
 from .evidence import record_human_decision, verify_and_commit_report
+from .descriptive import compare_population_distribution, describe_population
 from .modeling_ops import (
     prepare_modeling_sample,
     profile_binning,
@@ -31,6 +32,8 @@ __all__ = [
     "inspect_and_bind_snapshot",
     "check_label_maturity",
     "resolve_metric_and_dimensions",
+    "describe_population",
+    "compare_population_distribution",
     "run_portfolio_monitoring",
     "decompose_and_locate_anomaly",
     "prepare_modeling_sample",

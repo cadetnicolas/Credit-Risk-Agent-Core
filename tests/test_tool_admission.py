@@ -87,6 +87,113 @@ def test_duplicate_primary_key_blocks(tmp_path, grain):
     _no_saved_frame(tmp_path)
 
 
+def test_a_flag_column_cannot_be_the_decision_time(tmp_path):
+    """0/1 列会被 pandas 当成 1970 年时间戳，绑定通过了就变成按结果分期。"""
+
+    frame = pd.DataFrame(
+        {
+            "loan_id": [f"L{i}" for i in range(20)],
+            "dec": [1.0] * 8 + [0.0] * 12,
+        }
+    )
+    ledger = _ledger(tmp_path)
+    result = _bind(
+        ledger,
+        frame,
+        decision_time_column="dec",
+        observation_time_column=None,
+        weight_column=None,
+    )
+    assert result["ok"] is False
+    assert result["block_code"] == "SNAPSHOT_INVALID"
+    assert "不是日期" in result["summary"]["message"]
+
+    # 数值型的「日期」（如 20240901）会被读成 1970，同样拒绝。
+    numeric = pd.DataFrame(
+        {"loan_id": [f"L{i}" for i in range(20)], "dec": [20240901] * 20}
+    )
+    rejected = _bind(
+        ledger,
+        numeric,
+        decision_time_column="dec",
+        observation_time_column=None,
+        weight_column=None,
+    )
+    assert rejected["ok"] is False
+    assert rejected["block_code"] == "SNAPSHOT_INVALID"
+
+
+def test_object_dtype_flag_cannot_be_the_decision_time(tmp_path):
+    """object 存的 0/1 也是 0/1：dtype 不是判据，值才是。"""
+
+    frame = pd.DataFrame(
+        {
+            "loan_id": [f"L{i}" for i in range(20)],
+            "dec": pd.Series([1] * 8 + [0] * 12, dtype=object),
+        }
+    )
+    ledger = _ledger(tmp_path)
+    result = _bind(
+        ledger,
+        frame,
+        decision_time_column="dec",
+        observation_time_column=None,
+        weight_column=None,
+    )
+    assert result["ok"] is False
+    assert result["block_code"] == "SNAPSHOT_INVALID"
+
+
+@pytest.mark.parametrize(
+    "values, label",
+    [
+        ([1] * 9 + [2] * 10 + ["2024-10-01"], "1/2 编码混一个文本日期"),
+        ([2] * 9 + [3] * 10 + ["2024-10-01"], "2/3 编码混一个文本日期"),
+        ([20240901] * 19 + ["2024-10-01"], "yyyymmdd 混一个文本日期"),
+    ],
+)
+def test_a_mixed_numeric_decision_time_cannot_hide_behind_one_text_date(
+    tmp_path, values, label
+):
+    """一个文本日期会把 max(year) 抬到 2024，纯数值行照样是 1970 时间戳。
+
+    只要整个年份区间里有 1970，这一列就不是日期列：要么是编码，要么是
+    没转干净的日期。按最大年份判断会放过混在一起的编码行，两期分母于是
+    变成好客户数与坏客户数。
+    """
+
+    frame = pd.DataFrame(
+        {"loan_id": [f"L{i}" for i in range(20)], "dec": pd.Series(values, dtype=object)}
+    )
+    ledger = _ledger(tmp_path)
+    result = _bind(
+        ledger,
+        frame,
+        decision_time_column="dec",
+        observation_time_column=None,
+        weight_column=None,
+    )
+    assert result["ok"] is False, label
+    assert result["block_code"] == "SNAPSHOT_INVALID", label
+    assert "不是日期" in result["summary"]["message"], label
+
+
+def test_a_real_date_column_is_still_accepted(tmp_path):
+    """收紧判定不能把正常日期列一起拒掉。"""
+
+    frame = pd.DataFrame(
+        {
+            "loan_id": [f"L{i}" for i in range(20)],
+            "decision_date": pd.to_datetime(["2024-09-01"] * 10 + ["2024-10-01"] * 10),
+            "principal": [1000.0] * 20,
+        }
+    )
+    result = _bind(
+        _ledger(tmp_path), frame, observation_time_column=None, weight_column="principal"
+    )
+    assert result["status"] != "blocked", result.get("summary")
+
+
 def test_missing_key_and_decision_time_block(tmp_path):
     ledger = _ledger(tmp_path)
     missing_key = pd.DataFrame({"apply_id": ["A1"], "decision_date": ["2024-01-01"]})
@@ -197,6 +304,7 @@ def test_snapshot_profile_roles_and_degraded_future_dates(tmp_path):
         "observation_time": 1,
         "observation_outcome": 1,
         "suspect_leakage": 2,
+        "feature": 0,
         "unclassified": 4,
     }
     assert "zz-sample-cell" not in json.dumps(summary, ensure_ascii=False)
@@ -208,6 +316,33 @@ def test_snapshot_profile_roles_and_degraded_future_dates(tmp_path):
     assert meta["column_roles"]["loan_id"] == "id"
     assert meta["suspect_leakage"] == ["current_dpd", "score"]
     assert len(ledger.load_frame(result["snapshot_id"])) == 10
+
+
+def test_feature_role_can_be_declared_explicitly(tmp_path):
+    """0/1 字段只有被声明成 feature，描述工具才肯把它当特征来算。"""
+
+    frame = pd.DataFrame(
+        {
+            "loan_id": [f"L{i}" for i in range(10)],
+            "decision_date": ["2024-01-15"] * 10,
+            "has_guarantor": [0, 1] * 5,
+        }
+    )
+    ledger = _ledger(tmp_path)
+    result = _bind(
+        ledger,
+        frame,
+        observation_time_column=None,
+        weight_column=None,
+        column_roles={"has_guarantor": "feature"},
+    )
+    assert result["ok"] is True
+    assert result["summary"]["role_counts"]["feature"] == 1
+    meta = ledger.get_snapshot(result["snapshot_id"])
+    assert meta["column_roles"]["has_guarantor"] == "feature"
+    # feature 不是穿越列，也不进 observe 结果清单。
+    assert result["summary"]["suspect_leakage"] == []
+    assert result["summary"]["observation_outcomes"] == []
 
 
 def test_immature_cohorts_are_masked_out(tmp_path):
@@ -584,7 +719,7 @@ def test_missing_snapshot_and_invalid_contracts(tmp_path):
             frame,
             observation_time_column=None,
             weight_column=None,
-            column_roles={"loan_id": "feature"},
+            column_roles={"loan_id": "leak"},
         )
 
     missing = check_label_maturity(

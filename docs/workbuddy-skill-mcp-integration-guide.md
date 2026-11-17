@@ -10,13 +10,13 @@
 
 | 组件 | 本项目内容 | 用途 |
 | --- | --- | --- |
-| SKILL | `credit-data-admission`、`portfolio-anomaly-attribution`、`policy-cutoff-simulation`、`scorecard-modeling-pipeline` | 规定适用场景、分析步骤、工具使用、阻断条件和结论边界 |
+| SKILL | `credit-data-admission`、`portfolio-anomaly-attribution`、`policy-cutoff-simulation`、`population-distribution-analysis`、`scorecard-modeling-pipeline`、`deliverable-html-report` | 规定适用场景、分析步骤、工具使用、阻断条件和结论边界 |
 | MCP 服务 | `python -m credit_agent.mcp_server` | 通过 stdio 暴露数据检查、监控、策略、建模和报告工具 |
 | 数据目录 | WorkBuddy 配置中的 `--data-root` | 允许 MCP 读取的 CSV/Parquet 文件 |
 | 口径登记目录 | WorkBuddy 配置中的 `--registry-root` | 管理员维护的已签收 JSON/YAML 口径文件 |
 | 分析账本 | WorkBuddy 配置中的 `--ledger-root` | 保存快照、成熟度、审批决定、运行摘要与产物 |
 
-四个 SKILL 共声明十个业务工具，MCP 另提供 `list_credit_datasets`，共十一项。MCP 使用本地 stdio，不开放 HTTP 端口。数据访问由管理员配置的根目录限定；MCP 不提供文件任意路径参数。
+六个 SKILL 共声明十五个业务工具，MCP 另提供 `list_credit_datasets`，共十六项。MCP 使用本地 stdio，不开放 HTTP 端口。数据访问由管理员配置的根目录限定；MCP 不提供文件任意路径参数。
 
 WorkBuddy 文档说明，连接器包可以包含 `connector-meta.json`、`mcp.json` 与 `skills/{name}/SKILL.md`；MCP 支持 stdio，Skill 支持本地导入。不同 WorkBuddy 版本的菜单名称和导入方式可能不同，按当前客户端“本地 MCP 服务管理”和“技能”页面操作。参考[WorkBuddy Connector 文档](https://open.workbuddy.cn/en/docs/connector)和[WorkBuddy 技能文档](https://cloud.tencent.com/document/product/1831/134432)。
 
@@ -69,7 +69,7 @@ python workbuddy/build_connector.py \
 
 v0.3 契约要点（SKILL 均为 v1.3.0）：
 
-- 全部 14 个工具返回统一 envelope；`blocked` 必带 `block_code`，17 个码由 `src/credit_agent/tools/codes.py` 单一定义，SKILL 的停机码表与之对齐。
+- 全部 16 个工具返回统一 envelope；`blocked` 必带 `block_code`，17 个码由 `src/credit_agent/tools/codes.py` 单一定义，SKILL 的停机码表与之对齐。
 - `check_label_maturity` 新增 `observation_mode`（`monthly_cohort` / `latest_observed`）与 `maturity_choice_review_id`；`simulate_policy_rules` 新增 `economics`、`observation_mode`、`latest_review_id`，且 `rule_mining` 的 `features` 必须是登记表中 `point_in_time=decision` 的维度子集。
 - `run_portfolio_monitoring` 的 `base_periods` / `comp_periods` 为必填；`decompose_and_locate_anomaly`、`screen_features` 暴露登记阈值参数；`screen_features` / `train_and_evaluate_candidate` 暴露分箱口径参数，`profile_binning` 单独出单特征分箱档；`prepare_modeling_sample` 暴露 `random_state`。
 - `list_credit_datasets` 与其它工具一致返回 envelope（`summary.datasets`）。数据文件上限 100 MiB、口径文件 1 MiB；口径 YAML 禁止锚点/别名。

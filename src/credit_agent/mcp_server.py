@@ -21,7 +21,9 @@ import pandas as pd
 from credit_agent.tools import (
     Ledger,
     check_label_maturity as check_maturity,
+    compare_population_distribution as compare_distribution,
     decompose_and_locate_anomaly as locate_anomaly,
+    describe_population as describe_distribution,
     envelope,
     inspect_and_bind_snapshot as bind_snapshot,
     prepare_modeling_sample as prepare_sample,
@@ -211,6 +213,16 @@ def create_server(*, data_root: Path, registry_root: Path, ledger_root: Path):
     ledger = Ledger(ledger_root)
     server = FastMCP("credit-risk-agent")
 
+    def _registry(registry_name: str) -> dict[str, Any]:
+        """Load a host-maintained registry file from inside ``registry_root``."""
+
+        path = _file(registry_root, registry_name, {".json", ".yaml", ".yml"}, MAX_REGISTRY_BYTES)
+        content = path.read_text(encoding="utf-8")
+        registry = json.loads(content) if path.suffix.lower() == ".json" else _bounded_yaml(content, yaml)
+        if not isinstance(registry, dict):
+            raise ValueError("registry_must_be_an_object")
+        return registry
+
     @server.tool(name="download_sample")
     @_guarded("download_sample")
     def download_sample(sql: str, as_of_date: str | None = None,
@@ -378,13 +390,61 @@ def create_server(*, data_root: Path, registry_root: Path, ledger_root: Path):
     def resolve_metric_and_dimensions(snapshot_id: str, metric_id: str,
                                       metric_version: str, registry_name: str) -> dict[str, Any]:
         """Bind a metric from a host-maintained JSON/YAML registry, not model-authored text."""
-        path = _file(registry_root, registry_name, {".json", ".yaml", ".yml"}, MAX_REGISTRY_BYTES)
-        content = path.read_text(encoding="utf-8")
-        registry = json.loads(content) if path.suffix.lower() == ".json" else _bounded_yaml(content, yaml)
-        if not isinstance(registry, dict):
-            raise ValueError("registry_must_be_an_object")
         return bind_metric(snapshot_id, ledger=ledger, metric_id=metric_id,
-                           metric_version=metric_version, registry=registry)
+                           metric_version=metric_version, registry=_registry(registry_name))
+
+    @server.tool(name="describe_population")
+    @_guarded("describe_population")
+    def describe_population(snapshot_id: str, spec: dict[str, Any], period: str, column: str,
+                            dimensions: list[str] | None = None, bins: int = 10,
+                            registry_name: str | None = None) -> dict[str, Any]:
+        """Describe one column of one period without reading any target label.
+
+        `spec` is the caliber, and it must be filled in *before* the numbers are
+        looked at: population label, time column, denominator rule, and what a
+        blank or a zero means for every field used. A used field whose blanks or
+        zeros are unexplained returns `needs_human` instead of being silently
+        dropped or recoded to zero.
+
+        No label is read, so no maturity gate applies — and equally, no bad rate
+        can come out of this tool. Columns whose snapshot role is an outcome are
+        refused as the described column, as a dimension, as the denominator
+        filter, and as the period column. A 0/1 column that nobody has declared
+        as a `feature` returns `needs_human`, because its mean is a rate; the
+        check reads the values, not the dtype, so text `"0"/"1"` and booleans
+        are treated the same as `int64`. Values are normalised to tokens before
+        any numeric coercion, and the rule depends on which profile the column
+        will get: a coercible column is judged numerically (a 0..9 field is a
+        distribution, not a flag), while a non-coercible one falls back to a
+        categorical profile that prints every category's share — so there, zero
+        and one appearing together is enough. The same goes for outcomes written
+        as words (`good`/`bad`, `正常`/`逾期`). Literal missing codes (`N/A`, `-`,
+        `未知`, blank) count as missing rather than as a category, so `n_missing`
+        is honest and a column that is "50 ones plus 350 N/As" is seen as the
+        one-valued column it is. The check runs on the whole table,
+        on the period, and again on the denominator subset actually computed, and
+        a dimension cell that is binary inside an otherwise mixed column is
+        suppressed. Defaults to the full distribution:
+        thresholds passed via `spec.observation_points` are reported as extra
+        rows, never as the whole view.
+        """
+        registry = _registry(registry_name) if registry_name else None
+        return describe_distribution(snapshot_id, ledger=ledger, spec=spec, period=period,
+                                     column=column, dimensions=dimensions, bins=bins,
+                                     registry=registry)
+
+    @server.tool(name="compare_population_distribution")
+    @_guarded("compare_population_distribution")
+    def compare_population_distribution(base_run_id: str, comp_run_id: str,
+                                        alpha: float = 0.05) -> dict[str, Any]:
+        """Compare two described periods that share one caliber fingerprint.
+
+        Inputs are `describe_population` run ids, not raw periods: describing
+        first is what keeps a threshold slice from becoming the whole view.
+        Every test comes back with what it tests, when it applies, and what it
+        may conclude; `role` marks the pre-declared primary test.
+        """
+        return compare_distribution(base_run_id, comp_run_id, ledger=ledger, alpha=alpha)
 
     @server.tool(name="run_portfolio_monitoring")
     @_guarded("run_portfolio_monitoring")

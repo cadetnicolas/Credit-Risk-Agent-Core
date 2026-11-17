@@ -10,8 +10,8 @@ allowed-tools:
   - resolve_metric_and_dimensions
   - verify_and_commit_report
 metadata:
-  version: "1.5.0"
-  contract_version: "0.4"
+  version: "1.6.0"
+  contract_version: "0.5"
 ---
 
 # 信贷数据准入与样本设计规程 (`credit-data-admission`)
@@ -43,7 +43,7 @@ metadata:
 
 ## 何时使用 / 何时不使用
 
-**四规程优先级**：任何存量资产监控、异常归因、策略模拟或评分卡建模任务，都必须先经 `credit-data-admission` 完成数据准入体检，取得合法的 `dataset_snapshot_id` 与成熟样本结论；未过准入，其余三个规程不得启动。
+**五规程优先级**：任何存量资产监控、异常归因、策略模拟、评分卡建模或无标签分布分析任务，都必须先经 `credit-data-admission` 完成数据准入体检，取得合法的 `dataset_snapshot_id` 与成熟样本结论；未过准入，其余四个分析规程不得启动。
 
 **何时使用（触发条件）**：需要绑定数据快照、核查表现期成熟度、划分好坏灰样本、登记字段时点角色，或在标准成熟样本不足时向用户解释可用范围并请求选择替代分析方式时使用。信贷建模按月份观察（monthly_cohort），策略分析尽可能拿最新可观察样本（latest_observed），由调用方按场景选择 `observation_mode`。
 
@@ -120,6 +120,10 @@ metadata:
   - `decision_point_dimensions`：决策时点冻结字段（渠道、产品、客群、地区、审批评分档、授信额度档、当时命中的策略版本）；
   - `observation_outcomes`：观察时点结果字段（DPD、逾期阶段 M0~M4+、坏账标记、核销标记、在贷余额）；
   - `suspect_leakage`：未登记时点属性、命名含贷后特征（如 `repay_*`, `collect_*`, `current_dpd`, `writeoff_*`）的疑似穿越列。
+
+`inspect_and_bind_snapshot` 的 `column_roles` 接受 `decision_time` / `observation_outcome` / `suspect_leakage` / `feature`。`feature` 用于**主动声明某列是决策时点已知的特征**，主要针对 0/1 标记列：无标签描述工具（`population-distribution-analysis`）会把所有未声明为 `feature` 的 0/1 列拦在 `needs_human`，因为它们的均值就是比率——不声明它是什么，那 0.1 既可能是特征命中率，也可能是坏账率。
+
+`decision_time_column` 必须是**真日期**：取值为 0/1（数值、`object`、布尔都算）、小编码（`1/2`、`2/3`）、或纯数值编码（`20240901`、epoch 秒都会被 pandas 读成 1970 年纳秒时间戳）一律在绑定时以 `SNAPSHOT_INVALID` 拒绝。**数值与日期混在一列同样拒**：只要整个年份区间里出现 1970，这列就不是日期列——一个文本日期会把最大年份抬到 2024，按最大值判断会让剩下的编码行溜过去。否则一个 0/1 标签列可以冒充决策时点，之后按它分期，两期分母正好是坏客户数与好客户数。存量数据若用整数存日期，请先 `to_datetime(...).dt.strftime('%Y-%m-%d')` 再绑定。
 
 ### 步骤 3：样本成熟度与有效时间窗核算（按 observation_mode 分化）
 调用 `check_label_maturity` 传入 `dataset_snapshot_id`、批次列、决策时点列、目标表现期 $W$ 与 `observation_mode`：

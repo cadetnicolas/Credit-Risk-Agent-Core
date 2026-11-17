@@ -4,10 +4,10 @@ Checks four layers and exits non-zero on the first failing layer:
 
 1. ``~/.workbuddy/mcp.json`` registration: server entry, interpreter, three
    mutually disjoint roots.
-2. ``~/.workbuddy/skills``: the four declared skills and their reference docs.
+2. ``~/.workbuddy/skills``: the six declared skills and their reference docs.
 3. Whether the running client predates the config (MCP catalogue is built at
    process start, so a newer file needs a full restart to be listed).
-4. A real stdio handshake: boot the configured command and expect 12 tools.
+4. A real stdio handshake: boot the configured command and expect 16 tools.
 
 Usage::
 
@@ -25,20 +25,24 @@ import sys
 from pathlib import Path
 
 SERVER_NAME = "credit-risk-analysis"
-# 12 analysis tools + download_sample / import_sample_file. Keep this equal to
-# credit_agent.tools.codes.MCP_TOOL_NAMES — the release-contract test asserts it.
-EXPECTED_TOOL_COUNT = 14
+# 16 tools = 2 data-access + 14 analysis. Keep this equal to
+# credit_agent.tools.codes.MCP_TOOL_NAMES — the release-contract test asserts it,
+# because a stale count here reads as a broken install, not as a stale script.
+EXPECTED_TOOL_COUNT = 16
 REQUIRED_TOOLS = (
     "download_sample",
     "import_sample_file",
     "inspect_and_bind_snapshot",
     "check_label_maturity",
     "resolve_metric_and_dimensions",
+    "describe_population",
+    "compare_population_distribution",
     "run_portfolio_monitoring",
     "decompose_and_locate_anomaly",
     "simulate_policy_rules",
     "prepare_modeling_sample",
     "screen_features",
+    "profile_binning",
     "train_and_evaluate_candidate",
     "verify_and_commit_report",
     "list_credit_datasets",
@@ -49,6 +53,8 @@ SKILLS = {
     "portfolio-anomaly-attribution": "references/attribution-rules-and-formulas.md",
     "policy-cutoff-simulation": "references/cutoff-and-swapset-methodology.md",
     "scorecard-modeling-pipeline": "references/scorecard-math-and-thresholds.md",
+    "population-distribution-analysis": "references/population-spec-and-tests.md",
+    "deliverable-html-report": "references/layout-and-components.md",
 }
 
 

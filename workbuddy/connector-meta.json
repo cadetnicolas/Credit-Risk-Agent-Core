@@ -7,7 +7,7 @@
   "description_en": "Connect local credit tools: governed admission, monitoring, policy research, scorecard validation.",
   "source": "credit-risk-analysis",
   "type": "mcp",
-  "version": "0.6.1",
+  "version": "0.7.0",
   "minWorkbuddyVersion": "4.24.0",
   "examples_zh": [
     "检查信贷样本的成熟度和已签收指标口径",

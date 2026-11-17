@@ -143,8 +143,8 @@ async def run(params, dataset: str) -> int:
             tools = await session.list_tools()
             names = sorted(tool.name for tool in tools.tools)
             print(f"handshake ok, {len(names)} tools")
-            if len(names) != 14:
-                print(f"WARN: expected 14 tools, got {len(names)}: {names}", file=sys.stderr)
+            if len(names) != 16:
+                print(f"WARN: expected 16 tools, got {len(names)}: {names}", file=sys.stderr)
 
             listing = _payload(await session.call_tool("list_credit_datasets", {}))
             _show("list_credit_datasets", listing,

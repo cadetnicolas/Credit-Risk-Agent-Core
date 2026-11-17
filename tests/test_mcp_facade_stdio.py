@@ -92,6 +92,12 @@ def test_all_tools_are_callable_over_stdio(tmp_path):
                     "screen_features": {"prepare_run_id": "run_missing", "features": ["bad"]},
                     "train_and_evaluate_candidate": {"screen_run_id": "run_missing"},
                     "simulate_policy_rules": {"snapshot_id": snapshot, "mode": "unknown", "bad": "bad"},
+                    "describe_population": {
+                        "snapshot_id": snapshot, "spec": {}, "period": "2024-01", "column": "bad",
+                    },
+                    "compare_population_distribution": {
+                        "base_run_id": "run_missing", "comp_run_id": "run_missing",
+                    },
                 }
                 for name, arguments in rest.items():
                     raw = await session.call_tool(name, arguments)
