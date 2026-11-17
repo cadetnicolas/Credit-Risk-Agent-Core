@@ -18,6 +18,25 @@ The gate is different, not weaker:
   says so) are refused outright as the described column, as a dimension, and as
   a denominator filter — because ``mean`` of a 0/1 flag *is* a bad rate, and a
   per-channel ``bad_flag`` breakdown is a bad-rate table with a different title.
+
+Two decisions carry most of the 0/1 gate, and both are stated here because
+they are easy to get subtly wrong:
+
+* literal missing codes are missing. ``N/A`` / ``none`` / ``-`` / ``未知``
+  and the rest of the token list in ``analytics.distribution`` are folded into
+  missing *before* anything is counted, so ``n_missing`` / ``missing_share``
+  are truthful and no missing token ever becomes a category with a share next
+  to it. Without this a column that is 87.5% ``"N/A"`` reports ``n_missing = 0``
+  and its one remaining value carries a share that reads like a business rate.
+* the gate is judged by profile, and it stands on the rows that get used. A
+  coercible column is judged as a number (``0..9`` is a legitimate small
+  cardinality field, its mean is not a rate); a column that cannot be coerced
+  falls back to a categorical profile, which prints every category's share —
+  so there, zero and one appearing together is already a leak and no cap on
+  "how many dirty codes" is needed. The check runs three times: the whole
+  table, the period, and the period intersected with the declared denominator.
+  The third is the one that matters most: a disbursal decision column is
+  ``3/4/5`` across applications and ``1/0`` once narrowed to ``disbursed``.
 """
 
 from __future__ import annotations
@@ -85,6 +104,16 @@ def describe_population(
     When ``registry`` is supplied the spec must match a signed entry, otherwise
     it is recorded as unsigned — still versioned by ``spec_id`` / ``spec_version``
     and a fingerprint over the normalized content, but not a signed artifact.
+
+    Two things about the 0/1 gate that the module docstring states in full and
+    that a caller can trip over here: literal missing codes are folded into
+    missing before any counting (so ``n_missing`` is honest and a 87.5%-``N/A``
+    column no longer hides behind a single value), and the gate is evaluated on
+    the rows the numbers are actually computed from — the whole table, the
+    period, and the period intersected with the declared denominator — so
+    narrowing to ``disbursed`` can turn a benign ``3/4/5`` column into ``1/0``.
+    A hit returns ``needs_human`` with ``human_gate.kind = "binary_column_role"``
+    and no counts at all, and nothing is written to the ledger.
     """
 
     meta = ledger.get_snapshot(snapshot_id)

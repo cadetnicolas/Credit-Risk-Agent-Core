@@ -56,7 +56,7 @@ metadata:
 1. **`population_label` 与 `denominator_rule` 必须自洽。** 写「已放款客群」就必须是 `disbursed`，否则返回 `POPULATION_MISMATCH`。这条不是文案检查，而是防止用申请的分布解释放款的结论。
 2. **缺失与零值必须逐字段声明。** 有缺失或有零值、却没声明含义的列，会让工具直接返回 `needs_human` 并**不落 run**——因为「缺失当 0」还是「缺失当未知」会直接改分母和中位数。
    声明本身也真的会改数字：`missing: "zero_equivalent"` 会把缺失计入零值档并进入均值/分位数（摘要里 `n_imputed_zero` 给出补入条数），声明 `unknown` / `no_record` 则缺失只留在分母里。两种都同时给出 `without_zero` 块，供你判断零值是否属于该字段。
-   **字面缺失码按缺失处理**：`N/A`、`na`、`null`、`none`、`nan`、`-`、`--`、`?`、空串、`未知`、`空`、`缺失`、`未填`、`不适用`、`未提供`、`待补充`、`无数据` 都会被算成缺失，`n_missing` 与 `missing_share` 包含它们，`top_values` 里也不会出现这一档。否则一个 87.5% 都是 `"N/A"` 的列会报 `n_missing = 0`，而它剩下的那一档占比被当成业务指标读。
+   **字面缺失码按缺失处理**：`N/A`、`none`、`-`、空串、`未知` 这类写法都会被算成缺失，`n_missing` 与 `missing_share` 包含它们，`top_values` 里也不会出现这一档。完整清单以 `references/population-spec-and-tests.md` 为准，本文件不另存一份。否则一个 87.5% 都是 `"N/A"` 的列会报 `n_missing = 0`，而它剩下的那一档占比被当成业务指标读。
 3. **口径修订就升版本。** 同一 `spec_version` 的两次结果必须可比；改了口径还用旧版本号，`compare_population_distribution` 会以 `SPEC_MISMATCH` 拒绝。
 4. **`all_records` 不接受 `denominator_filter`。** 「全部记录」与「只看某类记录」互相矛盾；要过滤就把分母规则改成 `approved` / `disbursed` / `matured_only`，并让 `population_label` 跟着改。
 
@@ -134,7 +134,7 @@ inspect_and_bind_snapshot(..., column_roles={"has_guarantor": "feature"})
 
 分箱表两端固定带 `underflow` / `overflow` 行：落在基期边界之外的记录会出现在那里，不会被丢掉，也不会被重新归一化成「看起来没变」。所有占比的分母都是该期有效记录数（含按口径补入的零），占比之和恒为 1。两期分箱行数对不齐时工具不出分箱表，并在 `binning_note` 说明原因，而不是把两个不同的区间配成一行。
 
-分类列比较时，缺失作为一个独立类别（`<缺失>`，带 `is_missing`）参与构成检验与总变差距离：某期整列缺失时总变差距离是 1 而不是 0。类别占比的分母同样是该期全部记录，与描述里的 `top_values` 一致。
+分类列比较时，缺失作为一个独立类别（`<缺失>`，带 `is_missing`）参与构成检验与总变差距离：某期整列缺失时总变差距离是 1 而不是 0。类别占比的分母同样是该期全部记录，与描述里**分类列**的 `top_values` 一致；数值列的 `top_values.share` 以非缺失为分母，两边的占比不可放在一张表里比。
 
 签收状态取两期的交集：`summary.signoff` 分别给出 `base` / `comp`，只有两期都签收时 `spec.signed` 才为 `true`。一期签收、一期没签收时，`limitations` 会写明，结果按未签收口径对待。
 
