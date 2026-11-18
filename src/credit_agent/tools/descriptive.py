@@ -37,6 +37,14 @@ they are easy to get subtly wrong:
   table, the period, and the period intersected with the declared denominator.
   The third is the one that matters most: a disbursal decision column is
   ``3/4/5`` across applications and ``1/0`` once narrowed to ``disbursed``.
+  The same normalisation reaches every table this module emits — the described
+  column, its dimension cells (missing becomes an explicit ``<缺失>`` cell that
+  keeps its slot even when the cell list is truncated, never an 88%-share
+  business segment), the observation points, the gate, the period selector and
+  the denominator filter. A missing code that counts as missing in one place
+  and as a category — or as a period, or as a filter value — in another is
+  exactly how a column that is 88% blank gets reported as a business segment,
+  and how "not filled in" gets reported as "disbursed".
 """
 
 from __future__ import annotations
@@ -44,8 +52,10 @@ from __future__ import annotations
 import hashlib
 import json
 import math
+from numbers import Integral, Real
 from typing import Any, Dict, List, Mapping, Optional, Sequence
 
+import numpy as np
 import pandas as pd
 
 from credit_agent.analytics import distribution as dist
@@ -166,6 +176,41 @@ def describe_population(
 
     gate_columns = [column] + dims + [str((normalized.get("denominator_filter") or {}).get("column") or "")]
     gate_columns = [name for name in dict.fromkeys(gate_columns) if name]
+    # zero_equivalent 只对描述列生效：并进 0 会改写分组键或过滤谓词，而工具
+    # 不干这件事。接受但不改变数字，就是把口径变成一句文案——所以直接拒绝，
+    # 让分析者在声明处就改，而不是拿到一份「声明过却没生效」的数。
+    merged_elsewhere = [
+        name for name in gate_columns if name != column and _missing_as_zero(normalized, name)
+    ]
+    # 同一列既是描述列又是维度/分母过滤列时，两处会给出两个答案：均值把那批缺失
+    # 并进了 0，维度表里它们仍占一格 `<缺失>`——同一封信里「缺失当 0」和「缺失
+    # 单独一档」并存，读的人按维度表加权平均就对不上 column.mean。分组键与过滤
+    # 谓词都改不动，所以这种组合也拒绝，而不是让声明在半个工具里生效。
+    reused = column in dims or column == str(
+        (normalized.get("denominator_filter") or {}).get("column") or ""
+    )
+    if reused and _missing_as_zero(normalized, column):
+        return _blocked(
+            TOOL_DESCRIBE,
+            "UNSUPPORTED_SCOPE",
+            snapshot_id,
+            f"字段 {column} 声明了 missing=zero_equivalent，同时又用作维度或分母过滤列："
+            "描述列会把缺失并进 0，分组与过滤却只能按原值走，同一份结果里会出现两个口径。"
+            "请二选一——要么去掉这个维度/过滤列，要么把声明改为 unknown / no_record / "
+            "not_applicable。",
+        )
+    if merged_elsewhere:
+        return _blocked(
+            TOOL_DESCRIBE,
+            "UNSUPPORTED_SCOPE",
+            snapshot_id,
+            "；".join(
+                f"字段 {name} 声明了 missing=zero_equivalent，但它只用作维度或分母过滤列"
+                for name in merged_elsewhere
+            )
+            + "。把缺失并进 0 会改写分组或分母，工具不会这么做；声明留着不生效，"
+            "口径就成了文案。请改为 unknown / no_record / not_applicable。",
+        )
     refused = _label_refusals(meta, gate_columns)
     if refused:
         return _blocked(
@@ -191,13 +236,25 @@ def describe_population(
             f"切期字段 {time_column} 只有 0/1 两个取值，不可能是决策时点："
             "按它分期会把两期分母变成好客户数与坏客户数",
         )
-    periods = frame[time_column].astype(str)
-    if period not in set(periods.unique()):
+    normalized_time = dist.normalize_missing(frame[time_column])
+    if _is_missing_token(period):
+        # 时间列没填不是「一期」。不拦的话，Parquet 里 20% 写成 "N/A" 的决策日期
+        # 会多出一个名为 N/A 的期次，还能和真实月份做比较——而那 20% 恰恰是准入
+        # 已经报过的缺失。CSV 路径下 N/A 早已是空值，同一个口径两样结果。
         return _blocked(
             TOOL_DESCRIBE,
             "PERIOD_MISMATCH",
             snapshot_id,
-            f"期次 {period} 不在快照中；可选：{_brief_periods(periods)}",
+            f"期次 {period} 是缺失码，不是一期：时间列没填的行不属于任何期次，"
+            "要单独分析它们请先在取数侧定义这批行",
+        )
+    periods = normalized_time.astype(str).where(normalized_time.notna())
+    if str(period) not in set(periods.dropna().unique()):
+        return _blocked(
+            TOOL_DESCRIBE,
+            "PERIOD_MISMATCH",
+            snapshot_id,
+            f"期次 {period} 不在快照中；可选：{_brief_periods(periods.dropna())}",
         )
     in_period = periods == str(period)
     # 全表预检只拦住一眼可辨的；真正的判据是「这一期、这几个位置」是不是 0/1，
@@ -461,7 +518,18 @@ def compare_population_distribution(
     comp_signed = bool(comp_spec.get("signed"))
     normalized["signed"] = base_signed and comp_signed
     time_column = normalized["time_column"]
-    periods = frame[time_column].astype(str)
+    if _is_missing_token(base_period) or _is_missing_token(comp_period):
+        return _blocked(
+            TOOL_COMPARE,
+            "PERIOD_MISMATCH",
+            snapshot_id,
+            f"期次 {base_period if _is_missing_token(base_period) else comp_period} 是缺失码，"
+            "不是一期：时间列没填的行不是「某一期」，也不能和真实期次比",
+        )
+    normalized_time = dist.normalize_missing(frame[time_column])
+    # 时间列的缺失码不是一期：先归一，否则 Parquet 里一个 "N/A" 会变成可选的
+    # 期次，还能拿去和真实月份比较（CSV 路径下 N/A 已被解析成空值，比不了）。
+    periods = normalized_time.astype(str).where(normalized_time.notna())
     base_mask, note = _denominator_mask(frame, normalized, periods == base_period)
     comp_mask, note2 = _denominator_mask(frame, normalized, periods == comp_period)
     if base_mask is None or comp_mask is None:
@@ -656,6 +724,18 @@ def _normalize_spec(
         if not isinstance(values, (list, tuple)) or not values:
             return {}, ("UNSUPPORTED_SCOPE", "denominator_filter.values 必须是非空列表")
         declared = [str(item) for item in values]
+        # 缺失码不是业务取值：按 "N/A" 切出来的是「这一列没填」的行，冠上
+        # 「已放款客群」的名字就把「没填」写成了「放款」。而且 CSV 一读进来
+        # N/A 已被解析成空值，同一份口径换个文件格式就从出数变成报错，
+        # 所以必须在取值层面直接拒绝，而不是让它在一条路径上「碰巧不存在」。
+        missing_tokens = [item for item in declared if _is_missing_token(item)]
+        if missing_tokens:
+            return {}, (
+                "UNSUPPORTED_SCOPE",
+                f"分母过滤值里有缺失码：{'、'.join(missing_tokens[:3])}。"
+                "缺失不是业务取值，按它切出来的是「这一列没填」的行，不是声明的那个人群；"
+                "要单独分析这批行，请先在取数侧给它们一个明确的取值。",
+            )
         missing_values = [item for item in declared if not _value_present(frame[column], item)]
         if missing_values:
             return {}, (
@@ -760,6 +840,18 @@ def _denominator_mask(
         return in_period, None
     column = spec["denominator_filter"]["column"]
     values = list(spec["denominator_filter"]["values"])
+    # 缺失码不是业务取值。把 "N/A" 写进过滤值，得到的是「这一列没填」的那批行，
+    # 却会被当成「已放款客群」——而且 CSV 解析器已把 N/A 转成空值，同一份口径
+    # 换个文件格式就从出数变成报错。要让「没填」单独成一个总体，去取数侧给它
+    # 一个明确取值，别在口径里用缺失码。
+    missing_values = [value for value in values if _is_missing_token(value)]
+    if missing_values:
+        return None, (
+            "分母过滤值里有缺失码："
+            + "、".join(str(value) for value in missing_values[:3])
+            + "。缺失不是业务取值，按它切出来的是「这一列没填」的行，不是声明的那个人群。"
+            "请把过滤值改成真实的业务取值。"
+        )
     unknown = [value for value in values if not _value_present(frame[column], value)]
     if unknown:
         # 过滤值一个都不匹配时，分母会变成 0 而没人发现。
@@ -770,19 +862,29 @@ def _denominator_mask(
     return in_period & matched, None
 
 
+def _is_missing_token(value: Any) -> bool:
+    """True when a declared string is a missing code rather than a real value."""
+
+    if value is None:
+        return True
+    return bool(dist.normalize_missing(pd.Series([str(value)])).isna().iloc[0])
+
+
 def _value_mask(series: pd.Series, value: str) -> pd.Series:
     """Match a declared filter value as text, or numerically when it looks numeric.
 
     ``1`` in the data and ``"1.0"`` in the spec are the same record; comparing
     their string forms would either miss every record or demand a rewrite of a
-    caliber that is already correct.
+    caliber that is already correct. Missing cells (nulls or literal missing
+    codes) never match: they have no value to compare.
     """
 
+    series = dist.normalize_missing(series)
     mask = series.astype(str) == value
     number = _as_float(value)
     if number is not None:
         mask = mask | (pd.to_numeric(series, errors="coerce") == number)
-    return mask
+    return mask & series.notna()
 
 
 def _value_present(series: pd.Series, value: str) -> bool:
@@ -866,7 +968,8 @@ def _binary_values(series: pd.Series) -> List[str]:
 
     if pd.api.types.is_bool_dtype(series):
         return ["False", "True"]
-    text = series.dropna().astype(str).str.strip()
+    # 与判定同一口径：字面缺失码不是观测到的取值，不能出现在「你看到的值」里。
+    text = dist.normalize_missing(series).dropna().astype(str).str.strip()
     try:
         numbers = sorted({float(item) for item in text})
     except ValueError:
@@ -905,8 +1008,16 @@ def _binary_gate(
 
 
 def _is_numeric_column(series: pd.Series) -> bool:
+    # 与 describe_series 同一判据：先归一再说。否则 `"0"/"5"/"7"/"N/A"` 这种列
+    # 会被判成分类列而拒绝 zero_equivalent——同一份数据存成 CSV（float64）却
+    # 通过。同一个口径，换个文件格式一个能用一个不能用。
+    normalized = dist.normalize_missing(series)
+    if normalized.dropna().empty:
+        # 一个可观测值都没有：没有证据说它不是数值列，同一份数据存成 float64
+        # 时本来就通过。判定留给 describe_series（它会把整列按声明补成 0）。
+        return True
     try:
-        dist.as_numeric(series)
+        dist.as_numeric(normalized)
     except ValueError:
         return False
     return True
@@ -921,11 +1032,18 @@ def _undecided_semantics(
         if name not in subset.columns:
             continue
         series = subset[name]
-        n_missing = int(series.isna().sum())
+        # 与描述层同口径：字面缺失码（N/A、-、未知）也算缺失。用原始 isna()
+        # 数会得到「闸门看到 0 缺失、输出里缺 87%」——同一列两个答案，而且
+        # 恰好是闸门放行的那个方向。
+        normalized = dist.normalize_missing(series)
+        n_missing = int(normalized.isna().sum())
         n_zero = 0
         numeric = None
         try:
-            numeric = dist.as_numeric(series)
+            # 零值同样要在归一之后数：`"0"/"5"/"N/A"` 这样的列拿原始值转数值
+            # 会直接失败，闸门于是以为这列没有零值，只要求声明缺失、不要求声明
+            # 零值——而描述层照样会把那 25 个 0 当零值算进去。
+            numeric = dist.as_numeric(normalized)
         except ValueError:
             numeric = None
         if numeric is not None:
@@ -966,54 +1084,137 @@ def _dimension_breakdown(
 ) -> List[Dict[str, Any]]:
     rows: List[Dict[str, Any]] = []
     for name in dimensions:
-        grouped = subset[name].astype(str)
-        counts = grouped.value_counts()
+        # 维度列也要先归一，否则 88 个 "N/A" 会变成一个占比 0.88 的业务类别，
+        # 而同样位置的真空值又被 astype(str) 变成一格 "nan"——同一个缺失事实，
+        # 因为写法不同在维度表里得到两个相反的结果。归一后统一进 <缺失> 一格。
+        grouped = dist.normalize_missing(subset[name])
+        missing = grouped.isna()
+        n_missing_cell = int(missing.sum())
+        present = grouped[~missing]
+        # categorical dtype 的 value_counts 会把「声明了但这一期没出现」的类别
+        # 也数进来（count=0）：一期 5 个在用的渠道会报 distinct=10，还多出 5 格
+        # 0 计数的「业务档」。只留真的出现过的取值。
+        counts = present.value_counts()
+        counts = counts[counts > 0]
+        # 缺失格不参与「取前 20 档」的竞争：档位再多也留一个名额给它，否则
+        # 一个 20 档的维度里那 1% 缺失会静默消失，而文档说它「统一进 <缺失>」。
+        slots = _MAX_DIMENSION_CELLS - (1 if n_missing_cell else 0)
         cells = []
-        for value, count in counts.head(_MAX_DIMENSION_CELLS).items():
+        for value, count in counts.head(slots).items():
             cell = grouped == value
             entry: Dict[str, Any] = {
-                "value": str(value),
+                "value": _cell_label(value),
                 "count": int(count),
                 "share": float(count) / denominator if denominator else None,
             }
-            if int(count) >= _DEFAULT_MIN_CELL:
-                cell_series = subset.loc[cell, column]
-                # 整列不是 0/1，不代表某一档不是：一个总体 1/0/5 的列，到了
-                # 「a 档」里可能只剩 1/0，那一档的均值就是这一档的占比。
-                # 未声明为 feature 的列，档内是 0/1 就不给数字。
-                if not feature_declared and dist.is_binary_flag(cell_series):
-                    entry["suppressed"] = True
-                    entry["suppressed_reason"] = (
-                        "该维度档位内这一列只有 0/1 取值：均值与 share_one 就是占比；"
-                        "先在快照 column_roles 里声明它是不是 feature"
-                    )
-                    cells.append(entry)
-                    continue
-                series = dist.describe_series(
-                    cell_series,
-                    column=column,
-                    missing_as_zero=missing_as_zero,
-                )
-                entry["metric"] = {
-                    "mean": series.get("mean"),
-                    "p50": (series.get("quantiles") or {}).get("p50"),
-                    "missing_share": series.get("missing_share"),
-                }
-                if series.get("binary"):
-                    entry["metric"]["share_one"] = series["binary"].get("share_one")
-            else:
-                entry["suppressed"] = True
-                entry["suppressed_reason"] = f"样本量 {int(count)} < {_DEFAULT_MIN_CELL}"
+            _attach_cell_metric(
+                entry,
+                subset.loc[cell, column],
+                count=int(count),
+                column=column,
+                missing_as_zero=missing_as_zero,
+                feature_declared=feature_declared,
+            )
+            cells.append(entry)
+        if n_missing_cell:
+            entry = {
+                "value": dist.MISSING_CATEGORY,
+                "count": n_missing_cell,
+                # 让读者一眼看出这一格不是业务取值，而是「这一维没记」。
+                "is_missing": True,
+                "share": float(n_missing_cell) / denominator if denominator else None,
+            }
+            _attach_cell_metric(
+                entry,
+                subset.loc[missing, column],
+                count=n_missing_cell,
+                column=column,
+                missing_as_zero=missing_as_zero,
+                feature_declared=feature_declared,
+            )
             cells.append(entry)
         rows.append(
             {
                 "dimension": str(name),
-                "distinct": int(counts.size),
+                # distinct 把缺失算一个伪类别（读者要的是「这一维有几个档」，
+                # 含"没记"这一档），cells 里带 is_missing 的那一格就是它。
+                "distinct": int(counts.size) + (1 if n_missing_cell else 0),
                 "cells": cells,
-                "truncated": bool(counts.size > len(cells)),
+                "truncated": bool(counts.size > slots),
             }
         )
     return rows
+
+
+def _cell_label(value: Any) -> str:
+    """Render a dimension value so the same datum gets the same label twice.
+
+    A numeric column that carries a blank arrives as ``float64``, so ``astype``
+    would print ``1.0`` where the same column without a blank prints ``1`` —
+    two labels for one category, and a two-period join silently splits it.
+    The decision is made per value, not per column dtype: a numeric column that
+    ended up as ``object`` (mixed with a blank) would otherwise still print
+    ``1.0``. Strings keep their exact text, so ``"007"`` stays ``"007"``.
+    """
+
+    # 整数不先转 float：int64 超过 2^53 会被舍入，两个不同的档位渲染成同一个
+    # 标签，join 时就悄悄合并了。bool 是 Integral 的子类，先挡掉，否则 True
+    # 会渲染成 "1"，与真正的 1 混成一档。
+    if isinstance(value, bool):
+        return str(value)
+    if isinstance(value, Integral):
+        return str(int(value))
+    if isinstance(value, Real):
+        number = float(value)
+        # 整数先走整数路径：float32 的 16777216.0 若进 .7g 会变成
+        # "1.677722e+07"，而同一份数据的 float64 版本是 "16777216"，两档 join
+        # 时静默分裂。bool 已在上面挡掉。
+        if number.is_integer():
+            return str(int(number))
+        # 非整数统一按 7 位有效数字渲染，float32 与 float64 走同一条路：
+        # float32 的 0.1 是 0.10000000149011612，展开既不可读，也会和 float64
+        # 的"同一意图值"写成两个标签；float32 的精度上限本就在 7 位附近，
+        # 把 float64 压到同一精度换来的是跨 dtype 稳定。维度标签用于分组/join，
+        # 不承载数值精度，7 位足够区分业务档位。
+        return format(number, ".7g")
+    return str(value)
+
+
+def _attach_cell_metric(
+    entry: Dict[str, Any],
+    cell_series: pd.Series,
+    *,
+    count: int,
+    column: str,
+    missing_as_zero: bool,
+    feature_declared: bool,
+) -> None:
+    if count < _DEFAULT_MIN_CELL:
+        entry["suppressed"] = True
+        entry["suppressed_reason"] = f"样本量 {count} < {_DEFAULT_MIN_CELL}"
+        return
+    # 整列不是 0/1，不代表某一档不是：一个总体 1/0/5 的列，到了「a 档」里可能
+    # 只剩 1/0，那一档的均值就是这一档的占比。未声明为 feature 的列，档内是
+    # 0/1 就不给数字。
+    if not feature_declared and dist.is_binary_flag(cell_series):
+        entry["suppressed"] = True
+        entry["suppressed_reason"] = (
+            "该维度档位内这一列只有 0/1 取值：均值与 share_one 就是占比；"
+            "先在快照 column_roles 里声明它是不是 feature"
+        )
+        return
+    series = dist.describe_series(
+        cell_series,
+        column=column,
+        missing_as_zero=missing_as_zero,
+    )
+    entry["metric"] = {
+        "mean": series.get("mean"),
+        "p50": (series.get("quantiles") or {}).get("p50"),
+        "missing_share": series.get("missing_share"),
+    }
+    if series.get("binary"):
+        entry["metric"]["share_one"] = series["binary"].get("share_one")
 
 
 def _observation_points(
@@ -1022,10 +1223,18 @@ def _observation_points(
     points = spec.get("observation_points") or []
     if not points:
         return []
+    # 先归一再说：一列「10 / N/A / 12」拿原始值转数值会直接失败，于是
+    # 观察点整段变成空数组——画像里明明有均值，观察点却一条不给。
+    normalized = dist.normalize_missing(series)
     try:
-        numeric = dist.as_numeric(series)
+        numeric = dist.as_numeric(normalized)
     except ValueError:
-        return []
+        if not normalized.dropna().empty:
+            return []
+        # 与 describe_series 同一判据：一个可观测值都没有的文本列按数值处理
+        # （口径说缺失算 0 时整列就是 0）。否则同一份数据存成 float64 有一条
+        # 观察点、存成文本一条没有——与画像的口径分家。
+        numeric = pd.Series(float("nan"), index=normalized.index)
     values = numeric.fillna(0.0) if missing_as_zero else numeric.dropna()
     rows = []
     for point in points:

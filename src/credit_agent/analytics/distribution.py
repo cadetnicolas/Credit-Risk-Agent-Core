@@ -125,11 +125,24 @@ _PASS_LEXICON = _PASS_TOKENS | frozenset({"白名单"})
 
 # 字面写出来的缺失码。工具不把它们当一档取值：既会让 n_missing 报 0（而实际
 # 87.5% 都是它），也会让「只剩一个判定词」的列看起来还有第二个取值。
+#
+# 英文那一段以 pandas 的默认 NA 集合（`STR_NA_VALUES`）为**下限**：CSV 一进
+# `read_csv` 这些写法就变成空值了，Parquet 却原样保留。词表比它窄，同一份数据
+# 换个文件格式就会得到两个缺失率；比它宽，则会把数据里真实存在的取值悄悄抹掉。
+# 在它之上另收了 `-` / `--` / `?` / `/` 这类人工录入的空白写法——pandas 不认，
+# 但它们是同一件事。所以边界是「解析器已认的写法 + 明确表示空白的符号」，不是
+# 「看起来像缺失」。
+#
+# 有歧义的写法不收：`N.A` / `N.A.` 既可能是 not available，也可能是 North
+# America 的常用缩写（一个尾点不足以消歧，两种写法必须同进同出）；`无` /
+# `没有` / `否` 既可能是缺失说明，也可能是业务答案本身（「是否有担保：无」）。
+# 把它们判成缺失，等于把一条真信息从分析里抹掉且不留痕——这类只能在取数侧统一。
 _TEXT_MISSING_TOKENS = frozenset(
     {
-        "n/a", "na", "n.a.", "#n/a", "null", "none", "nan", "-", "--", "?", "/",
-        "未知", "空", "空白", "缺失", "未填", "未填写", "不适用", "未提供",
-        "待补充", "无数据", "没有数据",
+        "n/a", "na", "#n/a", "#n/a n/a", "#na", "<na>",
+        "null", "none", "nan", "-nan", "-1.#ind", "-1.#qnan", "1.#ind", "1.#qnan",
+        "-", "--", "?", "/", "未知", "空", "空白", "缺失", "未填", "未填写",
+        "不适用", "未提供", "待补充", "无数据", "没有数据",
     }
 )
 
@@ -381,9 +394,24 @@ def describe_series(
     except ValueError:
         numeric = None
         kind = "categorical"
-    if missing_as_zero and kind != "numeric":
-        # 分类列没有「0」这一档可并入；接受这个口径又不生效，等于让口径
-        # 变成一句文案。宁可直接拒绝。
+    if observed.empty:
+        # 一个可观测值都没有时，`as_numeric` 能不能成功纯由 dtype 决定：
+        # float64 全 NaN 成功 → numeric，文本全缺失码失败 → categorical。
+        # 同一列换个文件格式就换一套字段（有无 mean / n_zero / quantiles），
+        # 这是「口径由声明决定、不由格式决定」要消灭的。统一到口径那一侧：
+        #   - 声明「缺失等价于 0」：整列就是 0，走数值画像；
+        #   - 否则（含 unknown / no_record）：没有取值可归为数值，按分类画像。
+        # 后者还是 channel 这类「本期全缺、他期有渠道值」列能跨期比较的前提——
+        # 若强行判 numeric，base 数值 / comp 分类，比较直接 UNSUPPORTED_SCOPE。
+        if missing_as_zero:
+            numeric = pd.Series(float("nan"), index=series.index)
+            kind = "numeric"
+        else:
+            numeric = None
+            kind = "categorical"
+    elif missing_as_zero and kind != "numeric":
+        # 列里还有可观测值，却整体不是数值：分类列没有「0」这一档可并入；
+        # 接受这个口径又不生效，等于让口径变成一句文案。宁可直接拒绝。
         raise ValueError("missing_as_zero_requires_numeric")
     profile["kind"] = kind
 
@@ -729,6 +757,14 @@ def _materialize(series: pd.Series, missing_as_zero: bool, *, numeric_kind: bool
             values = as_numeric(series)
         except ValueError:
             values = None
+        if values is None:
+            # 画像已判定这一列走数值（numeric_kind 来自 base 画像），转换却失败，
+            # 剩下的情形基本只有「一个可观测值都没有的文本列」。与 describe_series
+            # 同一判据：没有取值能反证它不是数值列，按数值处理。否则同一份基期
+            # 存成 float64 时检验全部出数、存成文本时全部 None——报告里能写哪些
+            # 结论，由文件格式决定。
+            if normalize_missing(series).dropna().empty:
+                values = pd.Series(float("nan"), index=series.index)
         if values is not None:
             return values.fillna(0.0) if missing_as_zero else values
     if not missing_as_zero:
@@ -772,7 +808,7 @@ def _categorical_tests(
 # 缺失作为一个显式类别参与构成比较：它的占比变化本身就是构成变化，
 # 而且只有把它算进去，各类别占比之和才等于 1。
 _MISSING_KEY = "\x00missing"
-_MISSING_CATEGORY = "<缺失>"
+MISSING_CATEGORY = "<缺失>"
 
 
 def _category_counts(series: pd.Series) -> Dict[str, int]:
@@ -795,7 +831,7 @@ def _category_deltas(base: pd.Series, comp: pd.Series) -> List[Dict[str, Any]]:
         share_comp = _share(right_n, n_comp)
         delta = _delta(share_base, share_comp)
         row = {
-            "value": _MISSING_CATEGORY if value == _MISSING_KEY else value,
+            "value": MISSING_CATEGORY if value == _MISSING_KEY else value,
             "count_base": left_n,
             "count_comp": right_n,
             "share_base": share_base,

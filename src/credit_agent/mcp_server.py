@@ -14,7 +14,7 @@ import functools
 import json
 from itertools import combinations
 from pathlib import Path
-from typing import Any, Callable
+from typing import Any, Callable, Sequence
 
 import pandas as pd
 
@@ -53,6 +53,21 @@ def _file(root: Path, name: str, suffixes: set[str],
     if path.is_symlink() or path.stat().st_size > max_bytes:
         raise ValueError("resource_unavailable")
     return path
+
+
+def _read_snapshot_frame(path: Path, key_columns: Sequence[str]):
+    """Read a snapshot file with keys preserved across CSV and Parquet.
+
+    ``pd.read_csv`` infers dtypes and turns a key like ``"001"`` into the
+    integer ``1``, so ``"001"`` and ``"1"`` collide while the same data stored
+    as Parquet keeps both — the duplicate rate then depends on the file suffix.
+    Keys are identifiers, not quantities: leading zeros are part of identity.
+    Pin only the key columns to ``str`` (leaving other columns' dtypes alone,
+    which the description tools rely on). Parquet already round-trips them.
+    """
+    if path.suffix.lower() == ".csv":
+        return pd.read_csv(path, dtype={name: str for name in key_columns})
+    return pd.read_parquet(path)
 
 
 def _readable_input(path: str, *, data_root: Path, ledger_root: Path) -> Path:
@@ -359,9 +374,28 @@ def create_server(*, data_root: Path, registry_root: Path, ledger_root: Path):
         the extract date, so a file of old rows pulled today is still mature.
         Omit it only when the user cannot supply one; the cutoff then falls back
         to the largest date inside the file.
+
+        Quality comes back as counts and rates, never values: `column_missing`
+        gives the missing rate of every column that has any blank, and
+        `column_missing_summary` says whether the list was cut at 50 columns —
+        when it was, a column missing from the list may still be missing.
+        `high_missing_columns` (over 95% missing) and `constant_columns` (top
+        value over 99% of the non-missing entries) are derived from the same
+        numbers. Missing means a null *or* a literal missing code, which is the
+        rule the description tools apply, so a 62%-missing column cannot look
+        clean at admission and suddenly be 62% missing later. `key_null_rate`
+        follows that rule. `key_duplicate_rate` counts duplicates only among
+        rows whose key is complete — two rows that both wrote `N/A` are not
+        thereby the same loan, and a file where no row has a complete key is
+        refused outright rather than described as "duplicated". Key columns are
+        read as strings from CSV (leading zeros such as `001` are part of the
+        identity, not a quantity to be inferred), so `key_duplicate_rate` does
+        not change when the same file is stored as Parquet. The summary does not say
+        whether a blank used to read `N/A` or was simply empty: a CSV has
+        already been parsed by then, so ask the extract side.
         """
         path = _file(data_root, dataset, {".csv", ".parquet"})
-        frame = pd.read_csv(path) if path.suffix.lower() == ".csv" else pd.read_parquet(path)
+        frame = _read_snapshot_frame(path, key_columns)
         return bind_snapshot(frame, ledger=ledger, grain=grain, key_columns=key_columns,
                              decision_time_column=decision_time_column,
                              observation_time_column=observation_time_column,

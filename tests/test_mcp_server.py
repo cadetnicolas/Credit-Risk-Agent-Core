@@ -17,7 +17,7 @@ mcp = pytest.importorskip("mcp")
 from mcp import ClientSession, StdioServerParameters
 from mcp.client.stdio import stdio_client
 
-from credit_agent.mcp_server import _file, create_server
+from credit_agent.mcp_server import _file, _read_snapshot_frame, create_server
 
 
 TOOLS = {
@@ -129,3 +129,38 @@ def test_real_stdio_discovery_and_gate(tmp_path):
                 assert bound["summary"]["metric"]["signed_by"] == "risk"
 
     asyncio.run(exercise())
+
+
+def test_leading_zero_keys_survive_both_file_formats(tmp_path):
+    """主键前导零不能被 CSV 的类型推断吞掉，导致两格式重复率相反。
+
+    第六轮验收：`"001"` 与 `"1"` 在 CSV 上都被 `read_csv` 读成整数 1，判为
+    重复、`SNAPSHOT_INVALID`；同一份数据存成 Parquet 保留文本，不重复、绑定
+    通过。主键是标识，前导零是身份的一部分，重复率必须与文件格式无关。
+    """
+
+    from credit_agent.tools import inspect_and_bind_snapshot
+    from credit_agent.tools.ledger import Ledger
+
+    frame = pd.DataFrame({
+        "loan_id": ["001", "1", "002"],
+        "decision_at": ["2024-01-15"] * 3,
+    })
+    csv_path = tmp_path / "keys.csv"
+    pq_path = tmp_path / "keys.parquet"
+    frame.to_csv(csv_path, index=False)
+    frame.to_parquet(pq_path, index=False)
+
+    rates = {}
+    for label, path in (("csv", csv_path), ("parquet", pq_path)):
+        read = _read_snapshot_frame(path, ["loan_id"])
+        assert read["loan_id"].tolist() == ["001", "1", "002"], label
+        ledger = Ledger(tmp_path / f"ledger-{label}")
+        out = inspect_and_bind_snapshot(
+            read, ledger=ledger, grain="loan", key_columns=["loan_id"],
+            decision_time_column="decision_at", as_of_date="2024-06-01"
+        )
+        rates[label] = (out["status"], out["summary"].get("key_duplicate_rate"))
+
+    assert rates["csv"] == rates["parquet"]
+    assert rates["csv"][1] == 0.0

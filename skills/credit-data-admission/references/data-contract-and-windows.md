@@ -80,6 +80,33 @@
 }
 ```
 
+### 2.3 准入阶段的缺失画像（可读路径）
+
+`inspect_and_bind_snapshot` 的 `summary` 里，缺失按**空值或字面缺失码**统计（`N/A`、`-`、`未知` 一类），与无标签描述工具用的是同一份清单——两份清单各自维护一次，就会在同一个列上报出 0% 和 87% 两个答案。下面这些路径用于**在对话里读摘要**（`column_missing` 为空数组时 `.0` 不存在）：
+
+| 路径 | 含义 |
+| --- | --- |
+| `column_missing.0.column` | 缺失率最高的那一列 |
+| `column_missing.0.missing_share` | 该列缺失率 |
+| `column_missing.0.n_missing` | 缺失条数 |
+| `column_missing_summary.columns_with_missing` | 有缺失的列数 |
+| `column_missing_summary.returned` / `.truncated` | 实际返回几列 / 是否因超过 50 列被截断 |
+| `high_missing_columns` | 缺失率 $> 95\%$ 的列名 |
+| `constant_columns` | 单一值占**非缺失** $> 99\%$ 的列名 |
+| `key_null_rate` | 主键缺失率（同一口径：字面缺失码也算缺失） |
+
+**这些路径不能直接写进 `verify_and_commit_report` 的 `citation.path`**：准入工具只落快照、不落 run（它的 `run_id` 是 `null`），而引用核验读的是某个 run 的 `summary`。要在报告里引用某列缺失率，先用 `describe_population` 描述这一列（口径里声明好字段语义），再引它的 `column.missing_share`——那个数字与这里的 `missing_share` 是同一套口径算出来的，可以互相印证，但只有 run 里的数字能被核验。
+
+**「不在名单上」只有在 `truncated` 为 `false` 时才等于「0 缺失」**：宽表截断后，第 51 名以后的缺失列是看不见的，`columns_with_missing` 才是真实总数。
+
+这里**只报比率，不报「原本写的是 `N/A` 还是本来就空」**。CSV 一进 `pd.read_csv`，`N/A` / `NA` / `NULL` / `#NA` / `<NA>` 就已经被解析器转成空值，Parquet 才会原样保留；两条路到不了同一个拆分点，把它写进摘要只会出现「同一列，换个文件格式缺失原因不一样」。要这个区别去问取数侧，不要从摘要反推。
+
+不过**缺失率本身必须两条路一致**，所以工具词表刻意对齐了 pandas 的默认 NA 集合（`#NA`、`<NA>`、`#N/A N/A`、`-nan` 这些 Excel 导出写法都算缺失）。词表之外的写法（`*`、`.`、`N.A`、`N.A.`）两种格式都当取值——`N.A` / `N.A.` 刻意不收，它们都可能是 North America 的缩写，一个尾点不足以消歧，两种写法必须同进同出。
+
+`constant_columns` 的分母是**非缺失**条数：一列 40% 空白、其余全是一个值，仍然算常量——空白不是一个取值，把它算进分母会让常量列漏判。`key_null_rate` 同理走这套归一。`key_duplicate_rate` **只在主键齐全的行上算**：没有身份的行谈不上「重复了另一笔业务」，三行都写 `N/A` 只会被 `key_null_rate` 报一次，不再额外算成重复主键——否则一份「主键没填」的文件会被诊断成「主键重复」，方向正好相反。分母仍是全表行数，读法是「这份文件里有多大比例在重复一条已有的主键」。主键列从 CSV 读入时**固定按字符串**读（`pd.read_csv` 默认推断会把 `001` 读成整数 `1`，于是 `001` 与 `1` 被误判成同一笔；Parquet 本就保留文本），所以重复率与文件格式无关，前导零是身份的一部分，不是可推断的数量。**没有一行主键完整时**（每一行都缺至少一个主键分量，含复合主键交叉缺失）按 `SNAPSHOT_INVALID` 拦下，三种粒度一致——没有身份的行既不能算「重复」，也不该按粒度统计。
+
+口径里用到的高缺失列，到描述阶段会先被拦成 `needs_human`（`human_gate.kind` 视列形态是 `binary_column_role` 或 `field_semantics`），工具不会带着未定义的分母出数。
+
 ---
 
 ## 3. 已签收口径与维度登记表 YAML 规范

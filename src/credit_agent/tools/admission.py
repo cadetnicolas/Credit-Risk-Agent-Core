@@ -14,10 +14,14 @@ from typing import Any, Dict, Mapping, Optional, Sequence
 import numpy as np
 import pandas as pd
 
+from credit_agent.analytics import distribution as dist
 from credit_agent.tools.envelope import envelope
 from credit_agent.tools.ledger import Ledger, new_id
 
 _GRAINS = ("loan", "application", "loan_month")
+# 逐列缺失画像最多返回这么多列。宽表里全给会把信封撑成一张数据字典，
+# 而准入要看的是「哪几列烂」，排序后前 50 列已经够；截断了就明说。
+_MISSING_PROFILE_LIMIT = 50
 _EXPLICIT_ROLES = ("decision_time", "observation_outcome", "suspect_leakage", "feature")
 _ROLE_KEYS = (
     "id",
@@ -90,9 +94,25 @@ def inspect_and_bind_snapshot(
     case the future-date check is explicitly marked unavailable). Decision
     dates after that cutoff degrade the snapshot but do not discard it.
 
-    A column is constant when its most common non-null value covers more than
-    99% of the non-null entries. A column is high-missing when more than 95%
-    of its entries are null.
+    A column is constant when its most common non-missing value covers more
+    than 99% of the non-missing entries — a blank is not a value, so a column
+    that is 40% blank and otherwise single-valued is still constant. A column
+    is high-missing when more than 95% of its entries are missing, where
+    "missing" means a null *or* a literal missing code (``N/A``, ``-``,
+    ``未知`` …) — the same normalisation ``describe_population`` applies, so
+    the two tools cannot disagree about how much of a column is there.
+    ``column_missing`` reports the rate for every column with any missing
+    entry, sorted by rate, and stops at 50 columns;
+    ``column_missing_summary.truncated`` says whether it was cut, so "absent
+    from the list" means zero missing only when nothing was cut.
+    ``key_null_rate`` follows the same definition. ``key_duplicate_rate`` only
+    counts rows whose key is complete: a row with no identity cannot repeat
+    another loan, so three rows that all read ``N/A`` are reported by
+    ``key_null_rate`` and are not additionally counted as duplicates. When no
+    row has a complete key — every row missing at least one key column, or two
+    key columns missing on alternating rows — the snapshot is refused with
+    ``SNAPSHOT_INVALID``: there is no grain to declare. That holds for all
+    three grains, since a loan-month row without a loan id belongs to no loan.
     """
 
     frame = _require_frame(frame)
@@ -123,6 +143,16 @@ def inspect_and_bind_snapshot(
     null_rate, duplicate_rate = _key_rates(frame, keys)
     if grain in ("loan", "application") and duplicate_rate > 0:
         return _blocked("inspect_and_bind_snapshot", "SNAPSHOT_INVALID", "主键存在重复")
+    # 没有一行主键完整时这份文件没有身份，无从谈粒度——三种粒度都一样。
+    # 这一条要说出来，而不是靠重复率顺带拦住：重复率现在只在主键齐全的行上算，
+    # 两行空白不再「重复」。复合主键交叉缺失（这一行缺 A、那一行缺 B）也落在这里，
+    # 所以文案说「没有一行完整」，不说「整列缺失」。
+    if null_rate >= 1.0:
+        return _blocked(
+            "inspect_and_bind_snapshot",
+            "SNAPSHOT_INVALID",
+            "没有任何一行主键完整：每一行都缺至少一个主键分量，无法确认粒度",
+        )
 
     decision_days = _day_series(frame[decision_time_column])
     if not bool(decision_days.notna().any()):
@@ -190,7 +220,7 @@ def inspect_and_bind_snapshot(
         observation_time_column=observation_time_column,
         explicit_roles=explicit_roles,
     )
-    high_missing, constant = _quality_columns(frame)
+    missing_rows, high_missing, constant = _quality_columns(frame)
     leakage = [column for column, role in roles.items() if role == "suspect_leakage"]
     observation_outcomes = [column for column, role in roles.items() if role == "observation_outcome"]
     summary = {
@@ -207,6 +237,16 @@ def inspect_and_bind_snapshot(
         "future_date_check": future_date_check,
         "high_missing_columns": high_missing,
         "constant_columns": constant,
+        # 只给列名看不出「缺了多少」：一个 62% 缺失的渠道列与一个 96% 的备注列
+        # 在 high_missing_columns 里长一个样，而前者还能用、后者不能用。
+        "column_missing": missing_rows[:_MISSING_PROFILE_LIMIT],
+        "column_missing_summary": {
+            "columns_with_missing": len(missing_rows),
+            "returned": min(len(missing_rows), _MISSING_PROFILE_LIMIT),
+            "truncated": len(missing_rows) > _MISSING_PROFILE_LIMIT,
+            "high_missing_threshold": 0.95,
+            "missing_definition": "null_or_literal_token",
+        },
         "role_counts": _role_counts(roles),
         "suspect_leakage": leakage,
         "observation_outcomes": observation_outcomes,
@@ -699,27 +739,69 @@ def _role_counts(roles: Mapping[str, str]) -> Dict[str, int]:
 
 
 def _key_rates(frame: pd.DataFrame, key_columns: Sequence[str]) -> tuple[float, float]:
-    keys = frame.loc[:, list(key_columns)]
+    raw = frame.loc[:, list(key_columns)]
+    # 主键缺失率也走同一套归一：一列 70% 写成 "N/A" 的主键，在 column_missing
+    # 里是 70% 缺失，主键缺失率却报 0——同一封信里两个答案，而这一封是准入结论。
+    normalized = raw.apply(dist.normalize_missing)
     rows = len(frame)
-    null_rate = float(keys.isna().any(axis=1).mean())
-    duplicate_rate = float((rows - len(keys.drop_duplicates())) / rows)
+    blank = normalized.isna().any(axis=1)
+    null_rate = float(blank.mean()) if rows else 0.0
+    # 重复率只在「主键齐全」的那批行上算：没有身份的行谈不上「重复了另一笔业务」。
+    # 三行都写 "N/A" 时按原值去重会把它们算成一个值，于是重复率凭空多出两个重复
+    # ——那三行只是都没填，已经被 key_null_rate 报过了。分母仍取全表行数，读法
+    # 是「这份文件里有多大比例在重复一条已有的主键」。
+    identified = raw.loc[~blank]
+    duplicate_rate = float((len(identified) - len(identified.drop_duplicates())) / rows) if rows else 0.0
     return null_rate, duplicate_rate
 
 
-def _quality_columns(frame: pd.DataFrame) -> tuple[list[str], list[str]]:
-    high_missing = []
-    constant = []
+def _quality_columns(
+    frame: pd.DataFrame,
+) -> tuple[list[Dict[str, Any]], list[str], list[str]]:
+    """Per-column missing profile, plus the high-missing and constant lists.
+
+    Missing is counted on ``normalize_missing``, the same normalisation the
+    description tools use: literal missing codes (``N/A``, ``-``, ``未知``) count
+    as missing together with actual nulls. Counting raw ``isna()`` here would
+    let the admission step report 0% missing for a column that is 87% ``"N/A"``
+    while ``describe_population`` reports 87% — two answers to one question,
+    which is exactly how a "62% missing" column stays invisible until someone
+    already built a caliber on top of it.
+
+    The rate is reported, not the split. Whether a blank cell used to say
+    ``N/A`` or was simply empty cannot be answered here: a CSV has already had
+    its ``N/A`` / ``NA`` / ``NULL`` turned into a null by the parser before this
+    function runs, while a Parquet file keeps the token. Reporting a `n_literal`
+    count would therefore be right on one input path and wrong on the other,
+    which is worse than not reporting it — ask the extract side instead.
+    """
+
+    rows: list[Dict[str, Any]] = []
+    high_missing: list[str] = []
+    constant: list[str] = []
+    total = len(frame)
     for column in frame.columns:
         series = frame[column]
-        if float(series.isna().mean()) > 0.95:
+        normalized = dist.normalize_missing(series)
+        n_missing = int(normalized.isna().sum())
+        if n_missing > 0:
+            rows.append(
+                {
+                    "column": str(column),
+                    "n_missing": n_missing,
+                    "missing_share": (n_missing / total) if total else 0.0,
+                }
+            )
+        if total and (n_missing / total) > 0.95:
             high_missing.append(str(column))
-        observed = series.dropna()
+        observed = normalized.dropna()
         if observed.empty:
             continue
         top = int(observed.value_counts().iloc[0])
         if top / len(observed) > 0.99:
             constant.append(str(column))
-    return high_missing, constant
+    rows.sort(key=lambda item: (-item["missing_share"], item["column"]))
+    return rows, high_missing, constant
 
 
 def _day_series(series: pd.Series) -> pd.Series:

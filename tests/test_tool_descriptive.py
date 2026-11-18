@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import numpy as np
 import pandas as pd
 import pytest
 
@@ -1467,3 +1468,548 @@ def test_compare_restates_that_a_declared_feature_is_the_analysts_call(tmp_path)
     assert out["status"] == "ok", out
     assert out["summary"]["described_column"]["role"] == "feature"
     assert any("由分析者担保" in note for note in out["summary"]["limitations"])
+
+
+def test_a_literal_missing_code_reaches_the_semantics_gate(tmp_path):
+    """闸门与描述必须看到同一批缺失：用原始 isna() 数会漏掉 ``N/A``。
+
+    一列 88% 写成 ``"N/A"`` 时，原始 ``isna()`` 是 0——闸门据此放行，随后输出
+    里却报 ``missing_share = 0.88``。等于让工具在一个自己都没搞清口径的列上
+    算数字，而这正是 ``field_semantics`` 闸门存在的理由。
+    """
+
+    frame = pd.DataFrame(
+        {
+            "app_id": [f"a{i}" for i in range(100)],
+            "period": ["2024-10"] * 100,
+            "amount": [float(1000 + i) for i in range(100)],
+            "channel": ["N/A"] * 88 + ["线上"] * 6 + ["线下"] * 6,
+        }
+    )
+    ledger, snapshot_id = _ledger(tmp_path, frame)
+
+    out = _describe(ledger, snapshot_id, "2024-10", column="channel", dimensions=[])
+    assert out["status"] == "needs_human", out["summary"]
+    assert out["human_gate"]["kind"] == "field_semantics"
+    assert out["human_gate"]["columns"] == ["channel"]
+    # 闸门要数得出这 88 条，否则它拦的是一个它以为干净的列
+    assert out["summary"]["undecided"][0]["n_missing"] == 88
+
+    declared = _describe(
+        ledger,
+        snapshot_id,
+        "2024-10",
+        column="channel",
+        dimensions=[],
+        spec=_spec(field_semantics={"channel": {"missing": "unknown"}}),
+    )
+    assert declared["status"] == "ok", declared["summary"]
+    assert declared["summary"]["column"]["n_missing"] == 88
+    assert declared["summary"]["column"]["missing_share"] == pytest.approx(0.88)
+
+
+def test_a_zero_hidden_behind_a_literal_missing_code_is_still_asked_about(tmp_path):
+    """零值也要在归一之后数，否则闸门对「有零值的文本列」是瞎的。
+
+    ``"0"/"5"/"7"/"N/A"`` 这样的列拿原始值转数值会直接失败，``n_zero`` 记 0，
+    于是只要求声明缺失含义、不要求声明零值——但描述层照样把那 25 个 0 当零值
+    算进均值。缺了一半的口径问询，比不问更危险。
+    """
+
+    frame = pd.DataFrame(
+        {
+            "app_id": [f"a{i}" for i in range(100)],
+            "period": ["2024-10"] * 100,
+            "amount": [float(1000 + i) for i in range(100)],
+            "spend": ["0", "5", "7", "N/A"] * 25,
+        }
+    )
+    ledger, snapshot_id = _ledger(tmp_path, frame)
+    out = _describe(ledger, snapshot_id, "2024-10", column="spend", dimensions=[])
+
+    assert out["status"] == "needs_human", out["summary"]
+    item = out["summary"]["undecided"][0]
+    assert item["column"] == "spend"
+    assert item["n_missing"] == 25
+    assert item["n_zero"] == 25
+    # 两侧都要问：只问缺失，等于默认零值含义已知
+    assert item["missing_options"] and item["zero_options"]
+
+
+def test_a_dimension_cell_never_turns_a_missing_code_into_a_business_value(tmp_path):
+    """维度表里 88 个 ``"N/A"`` 不能变成一个占比 0.88 的业务类别。
+
+    同一个缺失事实，写成 ``"N/A"`` 会变成一格「业务取值」，写成真空值又被
+    ``astype(str)`` 变成一格 ``"nan"``——两种写法在维度表里得到相反的结果，而
+    被描述的列本身早已把两者都算成缺失。维度必须跟着同一口径走。
+    """
+
+    frame = pd.DataFrame(
+        {
+            "app_id": [f"a{i}" for i in range(100)],
+            "period": ["2024-10"] * 100,
+            "org_num": [float(i % 9) for i in range(100)],
+            "channel": ["N/A"] * 88 + ["线上"] * 6 + ["线下"] * 6,
+        }
+    )
+    ledger, snapshot_id = _ledger(tmp_path, frame)
+    spec = _spec(
+        field_semantics={
+            "org_num": {"missing": "no_record", "zero": "no_record"},
+            "channel": {"missing": "unknown"},
+        }
+    )
+    out = _describe(ledger, snapshot_id, "2024-10", spec=spec)
+    assert out["status"] == "ok", out["summary"]
+
+    dimension = out["summary"]["by_dimension"][0]
+    assert dimension["distinct"] == 3
+    cells = {cell["value"]: cell for cell in dimension["cells"]}
+    assert set(cells) == {"<缺失>", "线上", "线下"}
+    assert cells["<缺失>"]["is_missing"] is True
+    assert cells["<缺失>"]["count"] == 88
+    assert cells["<缺失>"]["share"] == pytest.approx(0.88)
+    assert "is_missing" not in cells["线上"]
+    # 维度格子里的占比要与「把 channel 当描述列」得到的缺失率是同一个数：
+    # 否则同一份数据在维度表与列画像里各说各话。
+    channels = _describe(
+        ledger, snapshot_id, "2024-10", column="channel", dimensions=[], spec=spec
+    )
+    assert channels["status"] == "ok", channels["summary"]
+    assert channels["summary"]["column"]["missing_share"] == pytest.approx(0.88)
+
+
+def test_observation_points_survive_a_literal_missing_code(tmp_path):
+    """观察点不能因为列里写了 ``N/A`` 就整段消失。
+
+    ``as_numeric`` 遇到 ``"N/A"`` 会直接抛错，原实现据此返回空数组——画像里
+    有均值分位数，``observation_points`` 却说这一列没有观察点，等于把一个
+    「≥10 家机构的占比」无声吞掉。
+    """
+
+    frame = pd.DataFrame(
+        {
+            "app_id": [f"a{i}" for i in range(100)],
+            "period": ["2024-10"] * 100,
+            "org_num": [str(i % 14) if i % 4 else "N/A" for i in range(100)],
+            "amount": [float(1000 + i) for i in range(100)],
+            "channel": ["线上" if i % 2 else "线下" for i in range(100)],
+        }
+    )
+    ledger, snapshot_id = _ledger(tmp_path, frame)
+    out = _describe(ledger, snapshot_id, "2024-10", dimensions=[])
+    assert out["status"] == "ok", out["summary"]
+
+    column = out["summary"]["column"]
+    points = out["summary"]["observation_points"]
+    assert [point["name"] for point in points] == ["≥10 家机构", "策略阈值 ≥12"]
+    observed = [
+        int(item) for item in pd.Series(frame["org_num"]).replace("N/A", pd.NA).dropna()
+    ]
+    assert points[0]["count"] == sum(1 for value in observed if value >= 10)
+    # 与画像同一批行：分位数与观察点都不含那 25 条 N/A
+    assert column["n_missing"] == 25
+    assert column["n_effective"] == 75
+
+
+def test_the_missing_cell_survives_a_truncated_dimension(tmp_path):
+    """档位再多，`<缺失>` 也不能被「取前 20 档」挤掉。
+
+    20 个业务档 + 1 条缺失时，缺失格排在最后，`head(20)` 会把它切掉：文档说
+    「统一进 `<缺失>` 一格」，表里却找不到这一格，那 1 条就此消失，而 cells 的
+    计数之和也不再等于分母。缺失格要占一个固定名额。
+    """
+
+    values = [f"s{index:02d}" for index in range(20)]
+    segment = [value for value in values for _ in range(5)] + ["N/A"]
+    frame = pd.DataFrame(
+        {
+            "app_id": [f"a{i}" for i in range(101)],
+            "period": ["2024-10"] * 101,
+            "org_num": [float(i % 9) for i in range(101)],
+            "segment": segment,
+        }
+    )
+    ledger, snapshot_id = _ledger(tmp_path, frame)
+    spec = _spec(
+        field_semantics={
+            "org_num": {"missing": "no_record", "zero": "no_record"},
+            "segment": {"missing": "unknown"},
+        }
+    )
+    out = _describe(ledger, snapshot_id, "2024-10", spec=spec, dimensions=["segment"])
+    assert out["status"] == "ok", out["summary"]
+
+    dimension = out["summary"]["by_dimension"][0]
+    assert dimension["truncated"] is True
+    assert len(dimension["cells"]) == 20  # 19 个业务档 + 缺失格
+    missing_cells = [cell for cell in dimension["cells"] if cell.get("is_missing")]
+    assert len(missing_cells) == 1
+    assert missing_cells[0]["count"] == 1
+    # 20 档里恰好被截掉一档：计数之和 = 101 - 5
+    assert sum(cell["count"] for cell in dimension["cells"]) == 96
+    assert dimension["distinct"] == 21
+
+
+def test_a_dimension_cannot_declare_missing_as_zero(tmp_path):
+    """维度列上的 `zero_equivalent` 必须被拒绝，不能「接受但不生效」。
+
+    把缺失并进 0 会改写分组键；工具不做这件事。接受了声明却照原样分组，等于
+    让口径变成一句文案——这与描述列上「分类列不许声明 zero_equivalent」是同
+    一条规则，不能因为换了位置就松掉。
+    """
+
+    frame = pd.DataFrame(
+        {
+            "app_id": [f"a{i}" for i in range(100)],
+            "period": ["2024-10"] * 100,
+            "org_num": [float(i % 9) for i in range(100)],
+            "channel": ["N/A"] * 20 + ["线上"] * 40 + ["线下"] * 40,
+        }
+    )
+    ledger, snapshot_id = _ledger(tmp_path, frame)
+    spec = _spec(
+        field_semantics={
+            "org_num": {"missing": "no_record", "zero": "no_record"},
+            "channel": {"missing": "zero_equivalent"},
+        }
+    )
+    out = _describe(ledger, snapshot_id, "2024-10", spec=spec, dimensions=["channel"])
+    assert out["status"] == "blocked", out["summary"]
+    assert out["block_code"] == "UNSUPPORTED_SCOPE"
+    assert "channel" in out["summary"]["message"]
+
+
+def test_a_zero_equivalent_column_cannot_also_be_a_dimension(tmp_path):
+    """同一列既当描述列又当维度时，两个口径会并存，必须拒绝。
+
+    描述列把缺失并进 0（`mean` 与 `n_imputed_zero` 都按 0 算），维度表却只能
+    按原值分组、把同一批行单列成 `<缺失>`——同一封信里两种口径，读者按维度表
+    加权平均对不上 `column.mean`。分组键改不动，所以这种组合直接拒绝，而不是
+    让声明在半个工具里生效。
+    """
+
+    frame = pd.DataFrame(
+        {
+            "app_id": [f"a{i}" for i in range(100)],
+            "period": ["2024-10"] * 100,
+            "org_num": [None if i % 10 == 0 else float(i % 9) for i in range(100)],
+        }
+    )
+    ledger, snapshot_id = _ledger(tmp_path, frame)
+    spec = _spec(field_semantics={"org_num": {"missing": "zero_equivalent", "zero": "true_zero"}})
+    out = _describe(ledger, snapshot_id, "2024-10", column="org_num", dimensions=["org_num"], spec=spec)
+    assert out["status"] == "blocked", out["summary"]
+    assert out["block_code"] == "UNSUPPORTED_SCOPE"
+    assert "org_num" in out["summary"]["message"]
+
+    # 作为普通维度、描述别的列时同样要拒绝（那里连描述列都不是）
+    out = _describe(ledger, snapshot_id, "2024-10", column="period", dimensions=["org_num"], spec=spec)
+    assert out["status"] == "blocked", out["summary"]
+    assert out["block_code"] == "UNSUPPORTED_SCOPE"
+
+
+def test_declared_but_unused_categories_are_not_dimension_cells(tmp_path):
+    """`categorical` 里声明过、这一期没出现的类别，不能变成 count=0 的档位。
+
+    `value_counts()` 对 categorical dtype 会把未出现的类别也列出来（count=0）：
+    一期只用了 3 个渠道，却报 `distinct=6` 并塞进 3 格 0 计数的「业务档」——
+    读者会以为这些渠道存在但没人用，进而写成「某渠道本期为零」。
+    """
+
+    frame = pd.DataFrame(
+        {
+            "app_id": [f"a{i}" for i in range(60)],
+            "period": ["2024-10"] * 60,
+            "org_num": [float(i % 9) for i in range(60)],
+            "channel": pd.Categorical(
+                ["线上"] * 30 + ["线下"] * 20 + ["代理"] * 10,
+                categories=["线上", "线下", "代理", "电销", "直销", "其他"],
+            ),
+        }
+    )
+    ledger, snapshot_id = _ledger(tmp_path, frame)
+    spec = _spec(
+        field_semantics={
+            "org_num": {"missing": "no_record", "zero": "no_record"},
+            "channel": {"missing": "unknown"},
+        }
+    )
+    out = _describe(ledger, snapshot_id, "2024-10", spec=spec, dimensions=["channel"])
+    assert out["status"] == "ok", out["summary"]
+    dimension = out["summary"]["by_dimension"][0]
+    assert dimension["distinct"] == 3
+    assert {cell["value"] for cell in dimension["cells"]} == {"线上", "线下", "代理"}
+    assert all(cell["count"] > 0 for cell in dimension["cells"])
+
+
+def test_a_text_numeric_column_accepts_zero_equivalent_like_a_float_one(tmp_path):
+    """同一列存成文本还是浮点，`zero_equivalent` 不能用出两个结果。
+
+    一列 `"0" / "5" / "7" / "N/A"` 拿原始值转数值会失败，于是被判成分类列而
+    拒绝 `zero_equivalent`；同一份数据经 CSV 读成 `float64` 却能通过。判断
+    是不是数值列，必须和描述、闸门用同一套「先归一」的判据。
+    """
+
+    rows = []
+    for index in range(100):
+        token = "N/A" if index % 4 == 0 else str(["0", "5", "7"][index % 3])
+        rows.append(
+            {
+                "app_id": f"a{index}",
+                "period": "2024-10",
+                "org_num": float(index % 9) if index % 4 else None,
+                "spend": token,
+            }
+        )
+    frame = pd.DataFrame(rows)
+    ledger, snapshot_id = _ledger(tmp_path, frame)
+    spec = _spec(
+        field_semantics={
+            "org_num": {"missing": "no_record", "zero": "no_record"},
+            "spend": {"missing": "zero_equivalent", "zero": "true_zero"},
+        }
+    )
+    text = _describe(ledger, snapshot_id, "2024-10", column="spend", dimensions=[], spec=spec)
+    assert text["status"] == "ok", text["summary"]
+    column = text["summary"]["column"]
+    assert column["n_missing"] == 25
+    assert column["n_imputed_zero"] == 25
+    # 缺失并入零后，均值 = 剩余取值之和 / 全部记录数
+    kept = [int(token) for index, token in enumerate(
+        ("N/A" if i % 4 == 0 else str(["0", "5", "7"][i % 3]) for i in range(100))
+    ) if token != "N/A"]
+    assert column["mean"] == pytest.approx(sum(kept) / 100)
+
+    # 同一条声明，换成浮点列，结论必须一样（缺失位置也一致）
+    numeric_frame = frame.copy()
+    numeric_frame["spend"] = [
+        None if token == "N/A" else float(token) for token in frame["spend"]
+    ]
+    numeric_ledger, numeric_snapshot = _ledger(tmp_path / "numeric", numeric_frame)
+    numeric = _describe(
+        numeric_ledger, numeric_snapshot, "2024-10", column="spend", dimensions=[], spec=spec
+    )
+    assert numeric["status"] == "ok", numeric["summary"]
+    assert numeric["summary"]["column"]["mean"] == pytest.approx(column["mean"])
+    assert numeric["summary"]["column"]["n_imputed_zero"] == column["n_imputed_zero"]
+
+
+def test_a_missing_code_cannot_be_a_denominator_filter_value(tmp_path):
+    """把 `"N/A"` 写进分母过滤值，切出来的是「这一列没填」的行。
+
+    这比算错更糟：它给这批行冠上「已放款客群」的名字，于是「没填」被写成
+    「放款」。而且 CSV 解析器已把 N/A 转成空值，同一条口径换个文件格式就
+    从「出数」变成「报错」。两条路都必须直接拒绝，并说清原因。
+    """
+
+    frame = pd.DataFrame(
+        {
+            "app_id": [f"a{i}" for i in range(50)],
+            "period": ["2024-10"] * 50,
+            "amount": [float(i) for i in range(50)],
+            "status": ["N/A"] * 20 + ["已放款"] * 30,
+        }
+    )
+    ledger, snapshot_id = _ledger(tmp_path, frame)
+    spec = _spec(
+        population_label="已放款客群",
+        denominator_rule="disbursed",
+        denominator_filter={"column": "status", "values": ["N/A"]},
+        field_semantics={
+            "amount": {"missing": "unknown", "zero": "true_zero"},
+            "status": {"missing": "unknown"},
+        },
+    )
+    out = _describe(ledger, snapshot_id, "2024-10", column="amount", dimensions=[], spec=spec)
+    assert out["status"] == "blocked", out["summary"]
+    assert out["block_code"] == "UNSUPPORTED_SCOPE"
+    assert "缺失码" in out["summary"]["message"]
+
+
+def test_a_missing_code_cannot_be_a_period(tmp_path):
+    """时间列没填不是「一期」，也不能和真实月份比。
+
+    Parquet 会原样保留 `"N/A"`，于是它变成一个可选期次：描述返回 ok，那 20%
+    缺失被当成一个总体，还能和真实月份做构成比较。而准入早就把它们报成缺失——
+    同一份数据在两步里给两个答案。
+    """
+
+    frame = pd.DataFrame(
+        {
+            "app_id": [f"b{i}" for i in range(50)],
+            "period": ["2024-10-01"] * 40 + ["N/A"] * 10,
+            "amount": [float(i) for i in range(50)],
+        }
+    )
+    ledger, snapshot_id = _ledger(tmp_path, frame)
+    spec = _spec(field_semantics={"amount": {"missing": "unknown", "zero": "true_zero"}})
+    out = _describe(ledger, snapshot_id, "N/A", column="amount", dimensions=[], spec=spec)
+    assert out["status"] == "blocked", out["summary"]
+    assert out["block_code"] == "PERIOD_MISMATCH"
+    assert "缺失码" in out["summary"]["message"]
+    # 真实期次照常
+    real = _describe(ledger, snapshot_id, "2024-10-01", column="amount", dimensions=[], spec=spec)
+    assert real["status"] == "ok", real["summary"]
+
+
+def test_an_all_missing_column_merges_into_zero_whatever_its_dtype(tmp_path):
+    """整列缺失时，文本与浮点必须给同一个答案。
+
+    一列全写 `"N/A"`（Parquet 保留文本）声明 `zero_equivalent` 时，原来被判成
+    分类列而拒绝；存成 float64 全 NaN 却通过并给出 `mean = 0`。口径能不能用
+    由文件格式决定，正是这一批要消灭的东西。
+    """
+
+    text_frame = pd.DataFrame(
+        {
+            "app_id": [f"a{i}" for i in range(40)],
+            "period": ["2024-10"] * 40,
+            "org_num": [float(i % 9) for i in range(40)],
+            "spend": ["N/A"] * 40,
+        }
+    )
+    float_frame = text_frame.assign(spend=[None] * 40)
+    spec = _spec(
+        field_semantics={
+            "org_num": {"missing": "no_record", "zero": "no_record"},
+            "spend": {"missing": "zero_equivalent", "zero": "true_zero"},
+        }
+    )
+    results = {}
+    for label, frame in (("text", text_frame), ("float", float_frame)):
+        ledger, snapshot_id = _ledger(tmp_path / label, frame)
+        out = _describe(ledger, snapshot_id, "2024-10", column="spend", dimensions=[], spec=spec)
+        assert out["status"] == "ok", out["summary"]
+        results[label] = out["summary"]["column"]
+    assert results["text"]["mean"] == pytest.approx(0.0)
+    assert results["float"]["mean"] == pytest.approx(0.0)
+    assert results["text"]["n_imputed_zero"] == results["float"]["n_imputed_zero"] == 40
+    assert results["text"]["n_missing"] == results["float"]["n_missing"] == 40
+
+
+def test_dimension_labels_do_not_print_binary_noise():
+    """标签是给人读的：`float32` 的二进制展开不能写进报告。
+
+    `np.float32(0.1)` 是 `0.10000000149011612`，直接渲染出来既不可读，也和同一
+    份数据的 `float64` 版本对不上。整数值不带 `.0`；文本原样保留，`007` 不能被
+    当成 7。
+    """
+
+    from credit_agent.tools.descriptive import _cell_label
+
+    assert _cell_label(np.float32(0.1)) == "0.1"
+    assert _cell_label(np.float64(0.1)) == "0.1"
+    assert _cell_label(1.0) == "1"
+    assert _cell_label(np.int64(3)) == "3"
+    assert _cell_label("007") == "007"
+    assert _cell_label(True) == "True"
+    assert _cell_label(2 ** 60) == str(2 ** 60)
+
+
+def test_an_all_missing_text_base_period_tests_the_same_numbers_as_a_float_one(tmp_path):
+    """检验与观察点必须用补零后的序列，不能由文件格式决定。
+
+    基期整列 `"N/A"`、口径声明「缺失算 0」时：存成 float64 全 NaN，四项检验
+    全部出数；存成文本，`as_numeric` 失败，`_materialize` 回退原始序列，检验
+    全是 None，`allowed_conclusions` 只剩 composition_change。画像数字两存法
+    一致，分歧精确落在「这份报告能写哪些结论」上。
+    """
+
+    def build(spend_base, spend_comp):
+        rows = []
+        for i in range(60):
+            rows.append({"app_id": f"b{i}", "period": "2024-09", "spend": spend_base,
+                         "channel": "线上" if i % 2 else "线下"})
+        for i in range(60):
+            rows.append({"app_id": f"c{i}", "period": "2024-10",
+                         "spend": spend_comp[i], "channel": "线上" if i % 2 else "线下"})
+        return pd.DataFrame(rows)
+
+    text_frame = build("N/A", [str(i % 7) for i in range(60)])
+    float_frame = build(None, [float(i % 7) for i in range(60)])
+    spec = _spec(
+        observation_points=[{"name": "≥0", "threshold": 0.0, "kind": "observation_point"}],
+        field_semantics={
+            "spend": {"missing": "zero_equivalent", "zero": "true_zero"},
+            "channel": {"missing": "unknown"},
+        },
+    )
+    outcomes = {}
+    for label, frame in (("text", text_frame), ("float", float_frame)):
+        ledger, snapshot_id = _ledger(tmp_path / label, frame)
+        base = _describe(ledger, snapshot_id, "2024-09", column="spend", dimensions=[], spec=spec)
+        comp = _describe(ledger, snapshot_id, "2024-10", column="spend", dimensions=[], spec=spec)
+        assert base["status"] == "ok" and comp["status"] == "ok"
+        out = compare_population_distribution(base["run_id"], comp["run_id"], ledger=ledger)
+        assert out["status"] == "ok", out["summary"]
+        tests = {test["test"]: test["p_value"] for test in out["summary"]["tests"]}
+        # 均值差两存法已经一致；检验与结论集合也必须一致
+        assert out["summary"]["mean_delta"] == pytest.approx(
+            sum(float(i % 7) for i in range(60)) / 60
+        )
+        outcomes[label] = {
+            "tests": tests,
+            "allowed": out["allowed_conclusions"],
+            "points_base": [(p["name"], p["count"], p["share"]) for p in base["summary"]["observation_points"]],
+        }
+    # 文本基期的检验不再全是 None，且与浮点版同一结论集合
+    assert all(value is not None for value in outcomes["text"]["tests"].values())
+    assert set(outcomes["text"]["tests"]) == set(outcomes["float"]["tests"])
+    for name, p_value in outcomes["float"]["tests"].items():
+        if p_value is None:
+            continue
+        assert outcomes["text"]["tests"][name] == pytest.approx(p_value), name
+    assert outcomes["text"]["allowed"] == outcomes["float"]["allowed"]
+    assert "composition_change" in outcomes["text"]["allowed"]
+    # 观察点：缺失当 0 时，基期 60 条全部 ≥ 0
+    assert outcomes["text"]["points_base"] == outcomes["float"]["points_base"]
+    assert outcomes["text"]["points_base"] == [("≥0", 60, 1.0)]
+
+
+def test_an_all_missing_column_is_categorical_when_missing_means_unknown(tmp_path):
+    """整列缺失在 `missing: unknown`（不补零）时也必须与 dtype 无关。
+
+    第六轮验收打穿：全缺失文本列在 `missing: unknown` 下走分类画像（没有
+    mean / n_zero / quantiles），同一份数据存成 float64 全 NaN 却走数值画像。
+    画像的字段集合由文件格式决定。画像的 kind 判据必须与口径无关，和
+    `_observation_points` / `_materialize` / `_is_numeric_column` 三处一致。
+    """
+
+    text_frame = pd.DataFrame(
+        {
+            "app_id": [f"a{i}" for i in range(20)],
+            "period": ["2024-10"] * 20,
+            "org_num": [float(i % 9) for i in range(20)],
+            "spend": ["N/A"] * 20,
+        }
+    )
+    float_frame = text_frame.assign(spend=[None] * 20)
+    # missing: unknown —— 明确不把缺失补成零，走的是「不为 zero_equivalent」分支
+    spec = _spec(field_semantics={"spend": {"missing": "unknown", "zero": "true_zero"}})
+    results = {}
+    for label, frame in (("text", text_frame), ("float", float_frame)):
+        ledger, snapshot_id = _ledger(tmp_path / label, frame)
+        out = _describe(ledger, snapshot_id, "2024-10", column="spend", dimensions=[], spec=spec)
+        assert out["status"] == "ok", out["summary"]
+        results[label] = out["summary"]["column"]
+    # 口径是 unknown（不补零）：两存法都按分类画像，kind 不再由 dtype 决定。
+    # 关键不是判成哪一类，而是两存法一致、字段集合一致（不是一列有 mean、
+    # 一列没有）。
+    assert results["text"]["kind"] == results["float"]["kind"] == "categorical"
+    assert set(results["text"]) == set(results["float"])
+    for field in ("n_missing", "missing_share", "n_effective", "distinct"):
+        assert results["text"][field] == results["float"][field], field
+
+
+def test_dimension_label_is_stable_across_float_widths():
+    """float32 与 float64 的同一意图值必须渲染成同一个维度标签。
+
+    第六轮验收：float32 走 `.7g`、float64 走完整 `str`，`3.14159265` 与
+    `16777216.0` 在两个宽度下得到不同标签，两期 join 时一档静默分裂成两档。
+    """
+
+    from credit_agent.tools.descriptive import _cell_label
+
+    for value in (3.14159265, 16777216.0, 0.1, 12.5, -7.25):
+        assert _cell_label(np.float32(value)) == _cell_label(np.float64(value)), value
