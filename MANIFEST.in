@@ -1,6 +1,7 @@
 recursive-include skills *
 recursive-include workbuddy *
 recursive-include cursor *
+recursive-include codex *.md *.py
 recursive-include scripts *.py
 recursive-include tools *.py
 recursive-include docs *.md *.html

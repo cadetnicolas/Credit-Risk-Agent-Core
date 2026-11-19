@@ -160,7 +160,7 @@ pytest -q
 
 **B. 平台原生工具注册** — 平台没有 MCP 但能注册 Python 函数时，直接导入 `credit_agent.tools` 下的公开函数包装成工具，门禁、envelope、账本逻辑全部复用，只是不走协议层。
 
-**C. 参考现成适配器** — `workbuddy/` 与 `cursor/` 各是一份完整适配器（元数据、构建脚本、图标）。WorkBuddy 打成连接器 ZIP；Cursor 打成本地插件目录。
+**C. 参考现成适配器** — `workbuddy/` 生成连接器 ZIP，`cursor/` 生成本地插件，`codex/` 生成包含 Skill 和 stdio MCP 的本地插件市场。
 
 三条路的详细配置、各客户端差异、逐项验证清单见 **[跨平台接入指南](docs/integration.md)**。
 
@@ -245,6 +245,7 @@ credit_risk_agent/
 ├── skills/                     # 6 个 SKILL 规程 + references 方法论
 ├── workbuddy/                  # WorkBuddy 适配器：连接器元数据、构建脚本、图标
 ├── cursor/                     # Cursor 适配器：插件清单、构建脚本、图标
+├── codex/                      # Codex 适配器：本地插件市场构建脚本
 ├── scripts/
 │   ├── make_demo_workspace.py  # 合成演示工作区
 │   ├── demo_end_to_end.py      # 端到端验证（支持任意 MCP 客户端配置或直接启动）
@@ -278,6 +279,7 @@ credit_risk_agent/
 | [取数链路设计](docs/sample-acquisition-design.md) | `download_sample` / `import_sample_file` 的契约与边界 |
 | [WorkBuddy 接入与打包](docs/workbuddy-skill-mcp-integration-guide.md) | WorkBuddy 适配器的构建与发布细节 |
 | [Cursor 接入与打包](docs/cursor-skill-mcp-integration-guide.md) | Cursor 本地插件的构建、安装与自检 |
+| [Codex 接入与打包](codex/README.md) | Codex 本地插件市场的构建、安装与更新 |
 | [WorkBuddy 安装与使用](docs/workbuddy-install-and-usage.md) | 装好之后的触发时机、数据目录约定、审批 CLI、排障 |
 | [功能复核记录](docs/skill-mcp-validation-2026-11-11.md) | 公开数据验证结果与边界 |
 | [docs/](docs/) | 文档总索引；历史设计稿在 `docs/archive/`，**不是实现依据** |

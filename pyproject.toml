@@ -73,6 +73,7 @@ credit_agent = ["config/*.html"]
 "share/credit-risk-agent/workbuddy" = ["workbuddy/*.md", "workbuddy/*.json", "workbuddy/*.svg", "workbuddy/*.py"]
 "share/credit-risk-agent/cursor" = ["cursor/*.md", "cursor/*.json", "cursor/*.py"]
 "share/credit-risk-agent/cursor/assets" = ["cursor/assets/*.svg"]
+"share/credit-risk-agent/codex" = ["codex/*.md", "codex/*.py"]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]

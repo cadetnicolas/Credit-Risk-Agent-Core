@@ -24,6 +24,7 @@
 | [workbuddy-skill-mcp-integration-guide.md](workbuddy-skill-mcp-integration-guide.md) | WorkBuddy 连接器的构建与打包：版本兼容、`mcp.json` 字段、ZIP 结构、发布自检 |
 | [workbuddy-install-and-usage.md](workbuddy-install-and-usage.md) | WorkBuddy 装好之后怎么用：SKILL 触发时机、数据目录约定、审批 CLI、排障 |
 | [cursor-skill-mcp-integration-guide.md](cursor-skill-mcp-integration-guide.md) | Cursor 本地插件的构建、安装到 `~/.cursor/plugins/local`、以及自检 |
+| [Codex 接入与打包](../codex/README.md) | Codex 本地插件市场的构建、安装与更新 |
 
 这三份是**平台适配记录**，不是使用前提。其它平台走 [integration.md](integration.md) 即可。
 

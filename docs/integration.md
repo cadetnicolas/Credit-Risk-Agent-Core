@@ -28,7 +28,7 @@
 | --- | --- |
 | 支持 stdio MCP | 方式 A：写 JSON 配置，零代码 |
 | 不支持 MCP，但能注册 Python 函数 | 方式 B：`import credit_agent.tools` 包装 |
-| 想直接复用一份完整适配器 | 方式 C：参考 `workbuddy/` 或 `cursor/` |
+| 想直接复用一份完整适配器 | 方式 C：参考 `workbuddy/`、`cursor/` 或 `codex/` |
 
 ### 3. 审批卡归谁管
 
@@ -224,6 +224,8 @@ def commit_report(run_ids: list[str], report_markdown: str, citations: list[dict
 - `plugin.json` — 插件清单（名称、版本、说明、图标相对路径）；
 - `build_connector.py` — 打包脚本：注入版本、生成 Cursor 的 `mcp.json`、复制六个 SKILL，可选安装到 `~/.cursor/plugins/local/credit-risk-analysis`；
 - `assets/logo.svg` — 图标。
+
+`codex/` 生成 Codex 本地插件市场，包含 `.codex-plugin/plugin.json`、`.mcp.json` 与项目 Skill。用 Codex CLI 添加市场并安装，参见 [Codex 接入与打包](../codex/README.md)。
 
 构建细节见 [WorkBuddy 接入与打包](workbuddy-skill-mcp-integration-guide.md) 与 [Cursor 接入与打包](cursor-skill-mcp-integration-guide.md)。
 
