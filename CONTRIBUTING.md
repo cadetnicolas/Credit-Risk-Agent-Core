@@ -75,7 +75,7 @@ ruff check src tests scripts    # 若无 ruff 可跳过，CI 只跑 pytest
 - 不要把审批能力暴露成工具（`record_human_decision` 必须留在宿主侧）；
 - 不要为了「让测试过」放宽门禁——先确认门禁本身是否设计错了，再改，并在 PR 里说明理由；
 - 不要提交任何真实业务数据、凭证、账本快照；
-- 不要在计算层里写死平台名（WorkBuddy 及任何客户端都不该出现在 `src/` 的计算逻辑里，`workbuddy/` 目录是例外，它就是适配层）。
+- 不要在计算层里写死平台名（WorkBuddy、Cursor 及任何客户端都不该出现在 `src/` 的计算逻辑里。`workbuddy/` 与 `cursor/` 是适配层，平台名只写在那里）。
 
 ## 提交与 PR
 

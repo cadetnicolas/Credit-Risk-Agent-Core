@@ -211,6 +211,16 @@ def test_install_self_check_tracks_the_real_catalogue():
         assert (SKILLS / name / "SKILL.md").is_file(), name
         assert (SKILLS / name / reference).is_file(), (name, reference)
 
+    cursor_spec = importlib.util.spec_from_file_location(
+        "verify_cursor_install", ROOT / "scripts/verify_cursor_install.py"
+    )
+    cursor = importlib.util.module_from_spec(cursor_spec)
+    cursor_spec.loader.exec_module(cursor)
+    assert cursor.EXPECTED_TOOL_COUNT == len(MCP_TOOL_NAMES)
+    assert set(cursor.REQUIRED_TOOLS) == set(MCP_TOOL_NAMES)
+    assert not set(cursor.FORBIDDEN_TOOLS) & set(MCP_TOOL_NAMES)
+    assert cursor.SKILLS == module.SKILLS
+
 
 def test_connector_metadata_and_version_are_release_ready():
     config = tomllib.loads((ROOT / "pyproject.toml").read_text(encoding="utf-8"))
@@ -219,6 +229,12 @@ def test_connector_metadata_and_version_are_release_ready():
     meta = json.loads((ROOT / "workbuddy/connector-meta.json").read_text(encoding="utf-8"))
     assert meta["version"] == version
     assert meta.get("minWorkbuddyVersion") == "4.24.0"
+    cursor_meta = json.loads((ROOT / "cursor/plugin.json").read_text(encoding="utf-8"))
+    assert cursor_meta["version"] == version
+    assert cursor_meta["name"] == "credit-risk-analysis"
+    assert cursor_meta["logo"] == "assets/logo.svg"
+    assert (ROOT / "cursor" / cursor_meta["logo"]).is_file()
+    assert "recursive-include cursor" in (ROOT / "MANIFEST.in").read_text(encoding="utf-8")
     assert 20 <= len(meta["description_en"]) <= 100
     assert re.fullmatch(r"[a-z0-9]+(?:-[a-z0-9]+)*", meta["source"])
     assert 2 <= len(meta["examples_zh"]) <= 5 and 2 <= len(meta["examples_en"]) <= 5

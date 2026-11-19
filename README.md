@@ -160,7 +160,7 @@ pytest -q
 
 **B. 平台原生工具注册** — 平台没有 MCP 但能注册 Python 函数时，直接导入 `credit_agent.tools` 下的公开函数包装成工具，门禁、envelope、账本逻辑全部复用，只是不走协议层。
 
-**C. 参考现成适配器** — `workbuddy/` 目录是一份已验证的完整适配器（连接器元数据、构建脚本、图标），可当作接入模板。
+**C. 参考现成适配器** — `workbuddy/` 与 `cursor/` 各是一份完整适配器（元数据、构建脚本、图标）。WorkBuddy 打成连接器 ZIP；Cursor 打成本地插件目录。
 
 三条路的详细配置、各客户端差异、逐项验证清单见 **[跨平台接入指南](docs/integration.md)**。
 
@@ -243,7 +243,8 @@ credit_risk_agent/
 │   ├── render/                 # HTML 报告渲染
 │   └── mcp_server.py           # stdio MCP 门面：16 个工具 + 启动期契约自检
 ├── skills/                     # 6 个 SKILL 规程 + references 方法论
-├── workbuddy/                  # 参考适配器：连接器元数据、构建脚本、图标
+├── workbuddy/                  # WorkBuddy 适配器：连接器元数据、构建脚本、图标
+├── cursor/                     # Cursor 适配器：插件清单、构建脚本、图标
 ├── scripts/
 │   ├── make_demo_workspace.py  # 合成演示工作区
 │   ├── demo_end_to_end.py      # 端到端验证（支持任意 MCP 客户端配置或直接启动）
@@ -262,7 +263,7 @@ credit_risk_agent/
 诚实说明，避免误用：
 
 - **公开数据只能证明代码路径，不能证明业务口径。** `scripts/verify_public_datasets.py` 跑的是 Kaggle 反欺诈与 HELOC 数据，能验证计算与链路，不能替代带真实申请日与表现标签的授权样本。
-- **平台兼容性是协议级的。** 已实测的完整适配器只有 WorkBuddy；其它 MCP 客户端按标准协议对接，本仓库提供验证脚本而非逐客户端认证。
+- **平台兼容性是协议级的。** 仓库交付的完整适配器是 WorkBuddy 与 Cursor。其它 MCP 客户端按标准协议对接，本仓库提供验证脚本而非逐客户端的桌面端认证。
 - **`latest_observed` 只做描述性测算。** 该模式返回 `degraded`，所有坏账率、Lift、正式推荐为空，不构成目标表现期坏账率，不得用于建模或上线收益测算。
 - **放宽审批后的新增收益不予估算。** 调入集（swap-in）的坏账率本质未知，`simulate_policy_rules` 会明确拒绝这类承诺。
 - **LightGBM 是可选依赖**，缺原生 OpenMP 时候选对比返回 `degraded`，不能当作完整双模型比较。
@@ -275,7 +276,8 @@ credit_risk_agent/
 | [跨平台接入指南](docs/integration.md) | MCP 客户端配置、原生工具注册、六步验证清单、常见平台差异 |
 | [架构说明](docs/architecture.md) | 分层职责、数据流、门禁与账本机制、扩展点 |
 | [取数链路设计](docs/sample-acquisition-design.md) | `download_sample` / `import_sample_file` 的契约与边界 |
-| [WorkBuddy 接入与打包](docs/workbuddy-skill-mcp-integration-guide.md) | 参考适配器的构建与发布细节（可作其它平台模板） |
+| [WorkBuddy 接入与打包](docs/workbuddy-skill-mcp-integration-guide.md) | WorkBuddy 适配器的构建与发布细节 |
+| [Cursor 接入与打包](docs/cursor-skill-mcp-integration-guide.md) | Cursor 本地插件的构建、安装与自检 |
 | [WorkBuddy 安装与使用](docs/workbuddy-install-and-usage.md) | 装好之后的触发时机、数据目录约定、审批 CLI、排障 |
 | [功能复核记录](docs/skill-mcp-validation-2026-11-11.md) | 公开数据验证结果与边界 |
 | [docs/](docs/) | 文档总索引；历史设计稿在 `docs/archive/`，**不是实现依据** |

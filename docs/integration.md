@@ -28,7 +28,7 @@
 | --- | --- |
 | 支持 stdio MCP | 方式 A：写 JSON 配置，零代码 |
 | 不支持 MCP，但能注册 Python 函数 | 方式 B：`import credit_agent.tools` 包装 |
-| 想直接复用一份完整适配器 | 方式 C：参考 `workbuddy/` |
+| 想直接复用一份完整适配器 | 方式 C：参考 `workbuddy/` 或 `cursor/` |
 
 ### 3. 审批卡归谁管
 
@@ -211,15 +211,23 @@ def commit_report(run_ids: list[str], report_markdown: str, citations: list[dict
 
 ## 四、方式 C：参考现成适配器
 
-`workbuddy/` 是一份跑通过的完整适配器，包含：
+仓库里有两份适配器，结构相同：元数据、构建脚本、图标。业务代码和 SKILL 仍只在项目根维护一份。
+
+`workbuddy/` 打成 WorkBuddy Connector：
 
 - `connector-meta.json` — 连接器元数据（名称、描述、示例、最低版本）；
 - `build_connector.py` — 打包脚本：读 `pyproject.toml` 版本、生成 `mcp.json`、复制 SKILL 与图标、打包 ZIP、做导入预检与产物断言；
 - `icon.svg` — 图标。
 
-把它当成模板读一遍，就能看清「一个平台的接入层到底需要描述哪些东西」。构建细节见 [WorkBuddy 接入与打包](workbuddy-skill-mcp-integration-guide.md)。
+`cursor/` 打成 Cursor 本地插件：
 
-注意：适配器里固化的是**构建机**的绝对路径，所以必须在最终运行它的那台机器上构建，不能跨机器拷贝。
+- `plugin.json` — 插件清单（名称、版本、说明、图标相对路径）；
+- `build_connector.py` — 打包脚本：注入版本、生成 Cursor 的 `mcp.json`、复制六个 SKILL，可选安装到 `~/.cursor/plugins/local/credit-risk-analysis`；
+- `assets/logo.svg` — 图标。
+
+构建细节见 [WorkBuddy 接入与打包](workbuddy-skill-mcp-integration-guide.md) 与 [Cursor 接入与打包](cursor-skill-mcp-integration-guide.md)。
+
+注意：适配器生成物里固化的是**构建机**的绝对路径，所以必须在最终运行它的那台机器上构建，不能跨机器拷贝。
 
 ---
 
@@ -325,4 +333,4 @@ python scripts/demo_end_to_end.py --config /path/to/your/mcp.json
 
 本项目承诺的是**协议级兼容**：标准 stdio MCP、标准 envelope 返回、标准 SKILL Markdown。
 
-已实测的完整适配器只有 WorkBuddy 一个。其它 MCP 客户端按标准对接，本仓库提供验证脚本（第 2、3 步）而不是逐客户端认证。如果你在某个平台上跑通了，欢迎在 issue 里补一条记录：客户端名 + 版本 + 使用的配置片段。
+仓库交付的完整适配器是 WorkBuddy 与 Cursor。其它 MCP 客户端按标准对接，本仓库提供验证脚本（第 2、3 步）而不是逐客户端的桌面端认证。如果你在某个平台上跑通了，欢迎在 issue 里补一条记录：客户端名 + 版本 + 使用的配置片段。

@@ -1,0 +1,14 @@
+{
+  "name": "credit-risk-analysis",
+  "displayName": "信贷分析工具",
+  "version": "0.7.0",
+  "description": "Governed credit admission, portfolio monitoring, policy research, and scorecard modeling for Cursor.",
+  "author": {
+    "name": "credit-risk-agent-core"
+  },
+  "homepage": "https://github.com/cadetnicolas/Credit-Risk-Agent-Core",
+  "repository": "https://github.com/cadetnicolas/Credit-Risk-Agent-Core",
+  "license": "MIT",
+  "keywords": ["credit-risk", "scorecard", "mcp", "vintage"],
+  "logo": "assets/logo.svg"
+}
