@@ -8,7 +8,11 @@
 from .html_report import (
     BASE_CSS,
     HARDEN_CSS,
+    audit_html,
     harden_html,
+    harden_interactive_report,
+    inline_data,
+    split_inline_data,
     bar_cell,
     callout,
     esc,
@@ -24,7 +28,11 @@ from .html_report import (
 __all__ = [
     "BASE_CSS",
     "HARDEN_CSS",
+    "audit_html",
     "harden_html",
+    "harden_interactive_report",
+    "inline_data",
+    "split_inline_data",
     "bar_cell",
     "callout",
     "esc",

@@ -1,11 +1,13 @@
 """交付级 HTML 报告渲染器（仅版式，不含业务口径）。
 
-设计约束（这三条决定了所有样式选择）：
+设计约束（五条决定了所有样式选择）：
 
 1. **任何内容都不得被裁掉**。宽表一律放进横向滚动容器，长字段名一律允许折行；
    不使用 ``overflow:hidden`` 去「修」溢出，那只会把内容切掉。
 2. **一屏之内先给结论**。KPI 用自适应网格，窄屏自动降列，不做固定列数。
-3. **打印与另存 PDF 要能看**。打印时展开滚动容器、去掉阴影与背景色。
+3. **打印与另存 PDF 要能看**。打印时展开滚动容器、去掉阴影与背景色，保留语义色。
+4. **没有 JS 也要有可读内容**。脚本渲染的报告必须带 ``<noscript>`` 静态摘要。
+5. **交付物要能维护和分享**。内联事件改事件委托，状态可写入 URL，数据可拆分/合成。
 
 用法::
 
@@ -39,7 +41,15 @@ TAG_KINDS = {"ok", "warn", "bad", "info", "gray"}
 
 BASE_CSS = """
 *,*::before,*::after{box-sizing:border-box}
-html{-webkit-text-size-adjust:100%}
+html{-webkit-text-size-adjust:100%;color-scheme:light}
+.sr-only{position:absolute!important;width:1px;height:1px;padding:0;margin:-1px;
+         overflow:hidden;clip:rect(0,0,0,0);white-space:nowrap;border:0}
+.skip-link{position:absolute;left:-9999px;top:0;z-index:9999;background:#fff;
+           color:#2f5fd0;padding:8px 14px;border:1px solid #dfe5ec;border-radius:0 0 6px 0;
+           font-size:13px}
+.skip-link:focus{left:0}
+:focus-visible{outline:2px solid #2f5fd0;outline-offset:2px}
+.print-only{display:none}
 body{margin:0;font-family:-apple-system,BlinkMacSystemFont,"PingFang SC","Hiragino Sans GB",
      "Microsoft YaHei",sans-serif;color:#1d2733;background:#f6f8fa;line-height:1.62;
      font-size:14px;-webkit-font-smoothing:antialiased}
@@ -135,14 +145,18 @@ footer{margin-top:40px;padding-top:14px;border-top:1px solid #dfe5ec;
   th,td{padding:6px 8px}
   td.c-id{min-width:130px;max-width:220px;font-size:11px}
 }
+@page{size:A4 landscape;margin:10mm}
 @media print{
-  body{background:#fff;font-size:11.5pt}
+  body{background:#fff;font-size:11.5pt;-webkit-print-color-adjust:exact;print-color-adjust:exact}
   .wrap{max-width:none;padding:0}
-  .tbl{overflow:visible;border-color:#bbb}
-  .tbl table{width:100%}
-  .box,.kpi,.feat{break-inside:avoid;box-shadow:none}
+  .no-print,.skip-link{display:none!important}
+  .print-only{display:block!important}
+  .tbl,.tw{overflow:visible!important;max-height:none!important}
+  .tbl table,table{width:100%}
+  thead th,td.lbl,th.lbl{position:static!important}
+  .box,.kpi,.feat,.note,tr{break-inside:avoid;box-shadow:none}
   section{break-inside:auto}
-  h2{break-after:avoid}
+  h2,h3{break-after:avoid}
 }
 """
 
@@ -223,7 +237,7 @@ def table(
         and _short_column([row[idx] if idx < len(row) else None for row in rows])
     }
     head = "".join(
-        f"<th{_cell_class(h, num=num, wide=wide, ident=ident, nowrap=nowrap)}>{esc(h)}</th>"
+        f'<th scope="col"{_cell_class(h, num=num, wide=wide, ident=ident, nowrap=nowrap)}>{esc(h)}</th>'
         for h in headers
     )
     body_rows = []
@@ -345,6 +359,27 @@ HARDEN_CSS = """
 .tbl td{min-width:3.2em}
 .tbl .num{white-space:nowrap}
 .tbl table{min-width:100%}
+/* ===== 交付加固（打印 / 无障碍 / 交互视图） ===== */
+.sr-only{position:absolute!important;width:1px;height:1px;padding:0;margin:-1px;
+         overflow:hidden;clip:rect(0,0,0,0);white-space:nowrap;border:0}
+.skip-link{position:absolute;left:-9999px;top:0;z-index:9999;background:#fff;
+           color:#2f5fd0;padding:8px 14px;border:1px solid #dfe5ec}
+.skip-link:focus{left:0}
+:focus-visible{outline:2px solid #2f5fd0;outline-offset:2px}
+.print-only{display:none}
+.tw-mx{overflow:auto;max-height:76vh}
+@page{size:A4 landscape;margin:10mm}
+@media print{
+  body{background:#fff;font-size:11.5pt;-webkit-print-color-adjust:exact;print-color-adjust:exact}
+  .no-print,.skip-link{display:none!important}
+  .print-only{display:block!important}
+  .print-title{font-size:16pt;font-weight:700;color:#2f5fd0;margin:0 0 10px}
+  .tbl,.tw,.tw-mx{overflow:visible!important;max-height:none!important}
+  table{width:100%}
+  thead th,td.lbl,th.lbl{position:static!important}
+  .box,.kpi,.feat,.note,.sec,tr{break-inside:avoid}
+  h2,h3{break-after:avoid}
+}
 """
 
 
@@ -361,11 +396,266 @@ def harden_html(content: str, extra_css: str = HARDEN_CSS) -> str:
             '<head><meta name="viewport" content="width=device-width,initial-scale=1">',
             1,
         )
+    if 'name="color-scheme"' not in content:
+        content = content.replace(
+            "<head>", '<head><meta name="color-scheme" content="light">', 1
+        )
+    if 'class="skip-link"' not in content:
+        content = content.replace(
+            "<body>", '<body><a class="skip-link" href="#main">跳到正文</a>', 1
+        )
     content = wrap_tables(content)
-    if extra_css:
+    if extra_css and extra_css not in content:
         block = f"<style>{extra_css}</style>"
         content = content.replace("</head>", block + "</head>", 1) if "</head>" in content else block + content
     return content
+
+
+_INTERACTION_MARK = '<script id="reportDeliveryHardening">'
+
+_INTERACTION_JS = r"""
+<script id="reportDeliveryHardening">
+(function(){
+  function readState(){
+    var s={};
+    (location.hash||'').replace(/^#/,'').split('&').forEach(function(kv){
+      if(!kv) return; var p=kv.split('=');
+      try{ s[p[0]]=decodeURIComponent(p[1]||''); }catch(e){}
+    });
+    return s;
+  }
+  var keys=[];
+  try{ keys=(window.REPORT_STATE_KEYS||[]).slice(); }catch(e){}
+  var writing=false;
+  function writeState(){
+    if(writing) return; writing=true;
+    try{
+      var state={}, i;
+      if(typeof S!=='undefined'){
+        if(keys.length){ for(i=0;i<keys.length;i++){ if(S[keys[i]]!=null) state[keys[i]]=S[keys[i]]; } }
+        else { ['branch','dim','year','metric','balDim','sortKey','sortDir'].forEach(function(k){
+          if(S[k]!=null) state[k]=S[k];
+        }); }
+      }
+      var parts=Object.keys(state).map(function(k){return k+'='+encodeURIComponent(state[k]);});
+      var next='#'+parts.join('&');
+      if(next!==location.hash) history.replaceState(null,'',next);
+    }catch(e){}
+    writing=false;
+  }
+  function applyState(st){
+    if(typeof S==='undefined') return;
+    Object.keys(st).forEach(function(k){ if(S[k]!=null||st[k]) S[k]=st[k]; });
+  }
+  function a11y(){
+    document.querySelectorAll('.tw').forEach(function(el){
+      if(el.querySelector('table.mx')) el.classList.add('tw-mx');
+    });
+    document.querySelectorAll('.chip').forEach(function(el){
+      if(el.hasAttribute('role')) return;
+      el.setAttribute('role','button'); el.setAttribute('tabindex','0');
+      el.setAttribute('aria-pressed',el.classList.contains('on')?'true':'false');
+      el.addEventListener('keydown',function(e){
+        if(e.key==='Enter'||e.key===' '){e.preventDefault();el.click();}
+      });
+    });
+    document.querySelectorAll('th.sortable').forEach(function(th){
+      if(!th.hasAttribute('tabindex')){
+        th.setAttribute('tabindex','0'); th.setAttribute('role','button');
+        th.addEventListener('keydown',function(e){
+          if(e.key==='Enter'||e.key===' '){e.preventDefault();th.click();}
+        });
+      }
+      th.setAttribute('aria-sort',th.classList.contains('act')
+        ? (th.textContent.indexOf('▲')>=0?'ascending':'descending') : 'none');
+    });
+    document.querySelectorAll('.tw table,.tbl table').forEach(function(t){
+      if(!t.querySelector('caption')){
+        var host=t.closest('.box,.sec')||document;
+        var head=host.querySelector('.box-h,.sec-h h2,h3');
+        var cap=document.createElement('caption');
+        cap.className='sr-only'; cap.textContent=head?head.textContent.trim():(document.title||'数据表');
+        t.insertBefore(cap,t.firstChild);
+      }
+      t.querySelectorAll('thead th').forEach(function(th){
+        if(!th.hasAttribute('scope')) th.setAttribute('scope','col');
+      });
+    });
+    var cnt=document.getElementById('cnt');
+    if(cnt&&!cnt.hasAttribute('aria-live')) cnt.setAttribute('aria-live','polite');
+    var pt=document.getElementById('printTitle');
+    if(pt){
+      var on=document.querySelector('.chip.on');
+      var asof=document.getElementById('asof');
+      pt.textContent=document.title+(on?' · '+on.textContent.trim():'')+
+        ' · '+(asof?asof.textContent:'');
+    }
+  }
+  function wrap(name,after){
+    if(typeof window[name]!=='function') return;
+    var orig=window[name];
+    window[name]=function(){ var r=orig.apply(this,arguments); if(after) after(); return r; };
+  }
+  ['setDim','setYear','setMetric','setBalDim','toggleBalZero','toggleBalActive',
+   'toggleVtActive','toggleC3Active','sortStaff'].forEach(function(n){ wrap(n,writeState); });
+  wrap('select',function(){ a11y(); writeState(); });
+  wrap('render',a11y);
+  window.addEventListener('hashchange',function(){
+    if(writing) return;
+    applyState(readState());
+    if(typeof render==='function') render();
+  });
+  document.addEventListener('click',function(e){
+    var target=e.target;
+    if(!target||!target.closest) return;
+    var c=target.closest('[data-branch]');
+    if(c&&typeof select==='function') select(c.getAttribute('data-branch'));
+    var el=target.closest('[data-call]');
+    if(el&&typeof window[el.getAttribute('data-call')]==='function'){
+      window[el.getAttribute('data-call')](
+        el.hasAttribute('data-arg')?el.getAttribute('data-arg'):undefined);
+    }
+  });
+  document.addEventListener('change',function(e){
+    var el=e.target;
+    if(!el||!el.hasAttribute||!el.hasAttribute('data-call')) return;
+    if(typeof window[el.getAttribute('data-call')]==='function'){
+      window[el.getAttribute('data-call')](el.value);
+    }
+  });
+  document.addEventListener('DOMContentLoaded',function(){
+    applyState(readState());
+    var pb=document.getElementById('printBtn');
+    if(pb) pb.addEventListener('click',function(){window.print();});
+    var cb=document.getElementById('copyLinkBtn');
+    if(cb) cb.addEventListener('click',function(){
+      var url=location.href;
+      if(navigator.clipboard&&navigator.clipboard.writeText){
+        navigator.clipboard.writeText(url).then(function(){
+          cb.textContent='已复制'; setTimeout(function(){cb.textContent='复制视图链接';},1600);
+        });
+      }else{ prompt('复制下面的链接：',url); }
+    });
+  });
+  applyState(readState());
+  if(typeof render==='function') render();
+})();
+</script>
+"""
+
+
+def harden_interactive_report(content: str, static_summary: str = "") -> str:
+    """加固「数据内联 + JS 渲染正文」的单文件报告，保留原数据与交互。
+
+    ``static_summary`` 是可信的 HTML 片段，会被原样写进 ``<noscript>``；
+    传入纯文本前请先用 :func:`esc` 转义。
+    """
+
+    if _INTERACTION_MARK in content:
+        return content
+    if 'name="color-scheme"' not in content:
+        content = content.replace("<head>", '<head><meta name="color-scheme" content="light">', 1)
+    if 'class="skip-link"' not in content:
+        content = content.replace("<body>", '<body><a class="skip-link" href="#main">跳到正文</a>', 1)
+    if 'id="printTitle"' not in content:
+        content = content.replace(
+            "<body>",
+            '<body><div class="print-only print-title" id="printTitle"></div>', 1,
+        )
+    if "<noscript" not in content:
+        summary = static_summary or (
+            '<p>交互式明细需要启用 JavaScript 才能渲染。请启用后刷新，'
+            '或向报告提供方索取 PDF 版本。</p>'
+        )
+        content = content.replace(
+            "<body>", f"<body><noscript>{summary}</noscript>", 1
+        )
+    if HARDEN_CSS not in content:
+        content = content.replace("</head>", f"<style>{HARDEN_CSS}</style></head>", 1)
+    content, _ = re.subn(
+        r"onclick=\"select\('([^']*)'\)\"", r'data-branch="\1"', content
+    )
+    for pattern, replacement in (
+        (r"onclick=\"([A-Za-z_$][\w$]*)\('([^']*)'\)\"", r'data-call="\1" data-arg="\2"'),
+        (r'onclick="([A-Za-z_$][\w$]*)\(\)"', r'data-call="\1"'),
+        (r'onchange="([A-Za-z_$][\w$]*)\(this\.value\)"', r'data-call="\1"'),
+    ):
+        content = re.sub(pattern, replacement, content)
+    content = re.sub(
+        r'(<div class="(?:kpis|grid3x)[^"]*)"\s+style="[^"]*grid-template-columns[^"]*"',
+        r'\1"', content,
+    )
+    if "</body>" in content:
+        content = content.replace("</body>", _INTERACTION_JS + "\n</body>", 1)
+    return content
+
+
+def audit_html(content: str) -> list[tuple[str, str]]:
+    """静态交付审计，返回 ``(PASS|WARN|FAIL, 检查项)`` 列表。不改文档。"""
+
+    rows: list[tuple[str, str]] = []
+
+    def add(level: str, message: str) -> None:
+        rows.append((level, message))
+
+    def has(pattern: str, flags: int = 0) -> bool:
+        return re.search(pattern, content, flags) is not None
+
+    add("PASS" if has(r"<!DOCTYPE html>", re.I) else "FAIL", "DOCTYPE")
+    add("PASS" if has(r'<meta[^>]*charset', re.I) else "FAIL", "charset meta")
+    add("PASS" if has(r'<meta[^>]*viewport', re.I) else "FAIL", "viewport meta")
+    add("PASS" if has(r'name="color-scheme"') else "WARN", "color-scheme meta")
+    external = re.findall(
+        r'<link\b|<script[^>]*\bsrc=|\@import|url\(\s*["\']?https?://', content, re.I
+    )
+    add("PASS" if not external else "WARN", "外部依赖（%d 处）" % len(external))
+    add("PASS" if has(r"\@media\s+print") else "FAIL", "@media print")
+    add("PASS" if has(r"print-color-adjust|print-color") else "WARN", "打印颜色保真")
+    add("PASS" if has(r"\@page\s*\{") else "WARN", "@page 纸张设置")
+    add("PASS" if has(r"<noscript") else "FAIL", "无 JS 兜底")
+    add("PASS" if has(r"location\.hash|history\.replaceState") else "WARN", "URL 深链状态")
+    add("PASS" if has(r"aria-|role=|tabindex") else "FAIL", "无障碍属性")
+    add("PASS" if has(r"<caption") else "WARN", "表格 caption")
+    add("PASS" if has(r"aria-pressed|aria-sort") else "WARN", "控件状态语义")
+    onclick = len(re.findall(r"\bonclick\s*=", content, re.I))
+    add("PASS" if onclick == 0 else "WARN", "内联事件 onclick（%d 处）" % onclick)
+    grids = len(re.findall(r'style="[^"]*grid-template-columns', content, re.I))
+    add("PASS" if grids == 0 else "WARN", "内联网格列数（%d 处）" % grids)
+    longest = max((len(line) for line in content.splitlines()), default=0)
+    add("PASS" if longest < 100000 else "WARN", "最大单行长度（%d 字符）" % longest)
+    tables = len(re.findall(r"<table\b", content, re.I))
+    wrappers = len(re.findall(r'class="[^"]*\b(tw|tbl)\b', content, re.I))
+    add("PASS" if tables <= wrappers else "WARN", "宽表滚动容器（%d 表 / %d 容器）" % (tables, wrappers))
+    add("FAIL" if has(r"table\s*\{[^}]*overflow:\s*hidden", re.I | re.S) else "PASS",
+        "表格 overflow:hidden 裁切")
+    add("PASS" if has(r"repeat\(\s*auto-fit") else "WARN", "auto-fit 自适应网格")
+    add("PASS" if has(r"focus-visible") else "WARN", "键盘焦点可见样式")
+    return rows
+
+
+_DATA_PATTERN = re.compile(r"(const\s+D\s*=\s*)(\{.*?\})(\s*;\s*\n)", re.S)
+_DATA_PLACEHOLDER = "/*__REPORT_DATA__*/ null"
+
+
+def split_inline_data(content: str) -> tuple[str, str]:
+    """拆出 ``const D = {...};``：返回 ``(模板, 纯 JSON 数据)``。"""
+
+    match = _DATA_PATTERN.search(content)
+    if not match:
+        raise ValueError("未找到 const D = {...}; 数据块")
+    template = (
+        content[:match.start()] + match.group(1) + _DATA_PLACEHOLDER
+        + match.group(3) + content[match.end():]
+    )
+    return template, match.group(2)
+
+
+def inline_data(template: str, data: str) -> str:
+    """把纯 JSON 数据写回模板占位符，合成自包含单文件。"""
+
+    if _DATA_PLACEHOLDER not in template:
+        raise ValueError("模板中未找到数据占位符")
+    return template.replace(_DATA_PLACEHOLDER, data.strip(), 1)
 
 
 def page(    title: str,
@@ -380,9 +670,16 @@ def page(    title: str,
 
     body = wrap_tables(body)
     footer_html = f"<footer>{footer}</footer>" if footer else ""
+    nojs = (
+        '<noscript><p>本页含交互脚本。正文仍需可读：请启用 JavaScript 后刷新，'
+        '或向报告提供方索取 PDF 版本。</p></noscript>'
+        if "<script" in body.lower() else ""
+    )
     return (
         f'<!DOCTYPE html><html lang="{lang}"><head>{_META}<title>{esc(title)}</title>'
         f"<style>{BASE_CSS}{extra_css}</style></head><body>"
+        f'<a class="skip-link" href="#main">跳到正文</a>{nojs}'
         f'<div class="wrap"><header><h1>{esc(title)}</h1>'
-        f'<div class="meta">{subtitle}</div></header>{body}{footer_html}</div></body></html>'
+        f'<div class="meta">{subtitle}</div></header><main id="main">{body}</main>{footer_html}</div>'
+        f"</body></html>"
     )

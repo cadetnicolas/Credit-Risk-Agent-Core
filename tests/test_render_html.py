@@ -7,10 +7,14 @@ import re
 from credit_agent.render import (
     BASE_CSS,
     HARDEN_CSS,
+    audit_html,
     bar_cell,
     callout,
     harden_html,
+    harden_interactive_report,
+    inline_data,
     page,
+    split_inline_data,
     table,
     tag,
     wrap_tables,
@@ -78,3 +82,70 @@ def test_components_escape_and_defaults():
     assert "无数据" in table(["a"], [])
     assert bar_cell(0.2, 0.4).count("width:50.0%") == 1
     assert bar_cell(0.2, 0.0).count("width:0.0%") == 1
+
+
+def test_page_has_skip_link_main_and_column_scope():
+    html = page("标题", "副标题", table(["特征", "IV"], [["f1", "0.4"]]))
+    assert 'class="skip-link"' in html
+    assert '<main id="main">' in html
+    assert '<th scope="col"' in html
+
+
+def test_print_rules_are_delivery_grade():
+    assert "@page{size:A4 landscape" in BASE_CSS
+    assert "print-color-adjust:exact" in BASE_CSS
+    assert "break-inside:avoid" in BASE_CSS
+    assert ".print-only{display:none}" in BASE_CSS
+    assert "focus-visible" in HARDEN_CSS
+
+
+def test_harden_html_adds_color_scheme_and_is_idempotent():
+    legacy = (
+        "<!DOCTYPE html><html><head><title>t</title></head>"
+        "<body><table><tr><td>x</td></tr></table></body></html>"
+    )
+    once = harden_html(legacy)
+    assert 'name="color-scheme" content="light"' in once
+    assert 'class="skip-link"' in once
+    assert once.count('name="color-scheme"') == 1
+    assert harden_html(once) == once
+
+
+def test_harden_interactive_report_converts_events_and_is_idempotent():
+    doc = (
+        '<!DOCTYPE html><html><head><style>.kpis{display:grid}</style></head><body>'
+        '<div class="kpis" style="grid-template-columns:repeat(5,1fr)"></div>'
+        '<div class="chip" onclick="select(\'甲\')">甲</div>'
+        '<button onclick="setDim(\'branch\')">分支</button>'
+        '<select onchange="setYear(this.value)"><option>2025</option></select>'
+        '<script>function render(){}</script></body></html>'
+    )
+    once = harden_interactive_report(doc, '<p>静态摘要</p>')
+    assert '<noscript><p>静态摘要</p></noscript>' in once
+    assert 'id="reportDeliveryHardening"' in once
+    assert 'data-branch="甲"' in once
+    assert 'data-call="setDim" data-arg="branch"' in once
+    assert 'data-call="setYear"' in once
+    assert "onclick=" not in once and "onchange=" not in once
+    assert "grid-template-columns:repeat(5,1fr)" not in once
+    assert harden_interactive_report(once) == once
+
+
+def test_audit_html_reports_missing_delivery_rules():
+    rows = audit_html("<!DOCTYPE html><html><head></head><body><table></table></body></html>")
+    levels = {message: level for level, message in rows}
+    assert levels["@media print"] == "FAIL"
+    assert levels["无 JS 兜底"] == "FAIL"
+    assert "viewport meta" in levels
+
+
+def test_inline_data_roundtrip_is_exact():
+    doc = (
+        "<!DOCTYPE html><html><head></head><body><script>\n"
+        'const D = {"meta":{"asof":"2026-10"}};\n'
+        "const B = D.branches;\n</script></body></html>"
+    )
+    template, data = split_inline_data(doc)
+    assert "/*__REPORT_DATA__*/ null" in template
+    assert data == '{"meta":{"asof":"2026-10"}}'
+    assert inline_data(template, data) == doc

@@ -146,16 +146,20 @@
   td.c-id{min-width:130px;max-width:220px;font-size:11px}
 }
 /* 打印 / 另存 PDF */
+@page{size:A4 landscape;margin:10mm}
 @media print{
-  body{background:#fff;font-size:11.5pt}
-  .tbl{overflow:visible}
-  .tbl table{width:100%}
-  .box,.kpi,.feat{break-inside:avoid}
-  h2{break-after:avoid}
+  body{background:#fff;font-size:11.5pt;-webkit-print-color-adjust:exact;print-color-adjust:exact}
+  .no-print,.skip-link{display:none!important}
+  .print-only{display:block!important}
+  .tbl,.tw{overflow:visible!important;max-height:none!important}
+  .tbl table,table{width:100%}
+  thead th,td.lbl,th.lbl{position:static!important}
+  .box,.kpi,.feat,.note,tr{break-inside:avoid}
+  h2,h3{break-after:avoid}
 }
 ```
 
-打印规则的关键是 `.tbl{overflow:visible}`——否则滚动容器会把右侧列的表格内容截在纸外。
+打印规则的关键是 `.tbl{overflow:visible}`——否则滚动容器会把右侧列的表格内容截在纸外；`print-color-adjust:exact` 保证红/橙/绿语义色不会被浏览器默认设置抹掉。
 
 ---
 
@@ -184,3 +188,41 @@ document.documentElement.scrollWidth === document.documentElement.clientWidth
 ```
 
 在 1280 / 900 / 760 三个宽度各跑一次，前两项分别应为「相等」与「0（760 允许少量）」。
+
+---
+
+## 6. 交互单文件报告的加固细则
+
+适用于「数据在 JS 里、正文由 JS 渲染」的看板型报告：
+
+1. **打印**：`@page` 横向 A4；打印时隐藏交互工具栏、展开滚动容器、去 sticky、保色、避免提示框跨页；打印标题写入「报告名 + 当前视图 + 数据时点」。
+2. **无 JS**：`<noscript>` 内放静态摘要表，至少覆盖各视图的关键指标；禁止只写一句「请开启 JavaScript」就结束。
+3. **深链**：`location.hash` 记录分支/维度/年份/指标/排序；`hashchange` 还原状态；提供复制视图链接按钮。用 `history.replaceState` 避免污染前进后退栈。
+4. **事件安全**：所有 `onclick="fn('${x}')"` 改为 `data-*`，由事件委托调用 `window[fn]`；含用户可控字符串时只用 `dataset`，不拼进 HTML 属性里的脚本片段。
+5. **无障碍**：`.chip` → `<button aria-pressed>` 或 `role="button" tabindex="0"`；排序表头 `role="button" tabindex="0" aria-sort` 且响应 Enter/Space；表格运行时补 `<caption class="sr-only">` 与 `scope="col"`；跳转链接 + `:focus-visible`。
+6. **响应式收口**：KPI/网格元素禁止内联 `grid-template-columns`；统一 `repeat(auto-fit,minmax(170px,1fr))`。若容器已有内联样式，用 `!important` 覆盖规则收口，不要逐个元素改。
+7. **Sticky 表头**：`thead th{position:sticky;top:0}` 只有在滚动容器自身可纵向滚动时才生效；仅 `overflow-x:auto` 的 `.tw` 不会让表头吸附页面顶部，需 `overflow:auto;max-height:76vh`。
+
+```css
+.sr-only{position:absolute!important;width:1px;height:1px;padding:0;margin:-1px;
+  overflow:hidden;clip:rect(0,0,0,0);white-space:nowrap;border:0}
+.skip-link{position:absolute;left:-9999px;top:0;z-index:9999;background:#fff;
+  color:#2f5fd0;padding:8px 14px;border:1px solid #dfe5ec}
+.skip-link:focus{left:0}
+:focus-visible{outline:2px solid #2f5fd0;outline-offset:2px}
+```
+
+---
+
+## 7. 数据双轨
+
+超过 500 KB 的单行内联 JSON 会让 diff 变成一行、编辑器卡顿，但拆成外链又破坏「双击即开」的离线交付。用双轨解决：
+
+```bash
+python3 scripts/data_split.py extract report.html src/     # src/data.js + src/report.source.html
+python3 scripts/data_split.py inline src/report.source.html src/data.js dist/report.html
+```
+
+- 源码模板保留 `const D = /*__REPORT_DATA__*/ null;`，`data.js` 只存纯 JSON 对象。
+- 交付版重新 inline 成单文件；拆分→合成必须字节一致（SHA256 可校验）。
+- 审计脚本对「最大单行 > 100k」给出的 WARN 属于交付版的设计取舍，需在交付说明中解释，不要为了消除 WARN 牺牲离线可用性。

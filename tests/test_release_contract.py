@@ -77,7 +77,7 @@ def test_skill_declarations_match_runtime(roots):
         declared = set(re.findall(r"^  - ([a-z_]+)$", fm["raw"], flags=re.MULTILINE))
         assert declared and declared <= served, path
         assert "record_human_decision" not in declared
-        assert 'version: "1.6.0"' in fm["raw"], path
+        assert re.search(r'version: "1\.(?:6|7)\.0"', fm["raw"]), path
         assert 'contract_version: "0.5"' in fm["raw"], path
         assert "gate-tools" not in fm["raw"], path
         assert "何时使用" in fm["body"] and "何时不使用" in fm["body"], path
